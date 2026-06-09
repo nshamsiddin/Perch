@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      { "command": "python3 ./hooks/cursor_agent_state.py working" }
+    ],
+    "afterFileEdit": [
+      { "command": "python3 ./hooks/cursor_agent_state.py edit" }
+    ],
+    "beforeShellExecution": [
+      { "command": "python3 ./hooks/cursor_agent_state.py shell" }
+    ],
+    "stop": [
+      { "command": "python3 ./hooks/cursor_agent_state.py done" }
+    ]
+  }
+}

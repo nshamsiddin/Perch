@@ -7,6 +7,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fullScreenObserver: FullScreenObserver!
     private var statusItem: NSStatusItem!
     private var energyModeMenu: NSMenu!
+    private var mediaToggleItem: NSMenuItem!
+    private var batteryToggleItem: NSMenuItem!
+    private var agentsToggleItem: NSMenuItem!
+    private var notifyToggleItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         services = AppServices(state: state)
@@ -35,9 +39,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+        // Refresh the feature checkmarks each time the menu opens so they reflect live state.
+        menu.delegate = self
         let header = NSMenuItem(title: "Islet", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        menu.addItem(.separator())
+
+        let featuresHeader = NSMenuItem(title: "Features", action: nil, keyEquivalent: "")
+        featuresHeader.isEnabled = false
+        menu.addItem(featuresHeader)
+
+        mediaToggleItem = NSMenuItem(title: "Media", action: #selector(toggleMedia), keyEquivalent: "")
+        batteryToggleItem = NSMenuItem(title: "Battery", action: #selector(toggleBattery), keyEquivalent: "")
+        agentsToggleItem = NSMenuItem(title: "AI Agents", action: #selector(toggleAgents), keyEquivalent: "")
+        for item in [mediaToggleItem!, batteryToggleItem!, agentsToggleItem!] {
+            item.target = self
+            menu.addItem(item)
+        }
+        // Sub-option of AI Agents: an alert + sound when an agent starts waiting for input.
+        notifyToggleItem = NSMenuItem(title: "Notify on waiting",
+                                      action: #selector(toggleNotify), keyEquivalent: "")
+        notifyToggleItem.target = self
+        notifyToggleItem.indentationLevel = 1
+        menu.addItem(notifyToggleItem)
+        updateFeatureChecks()
         menu.addItem(.separator())
 
         let energyItem = NSMenuItem(title: "Energy Mode", action: nil, keyEquivalent: "")
@@ -78,6 +104,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Feature toggles
+
+    @objc private func toggleMedia() {
+        state.mediaEnabled.toggle()
+        updateFeatureChecks()
+    }
+
+    @objc private func toggleBattery() {
+        state.batteryEnabled.toggle()
+        updateFeatureChecks()
+    }
+
+    @objc private func toggleAgents() {
+        state.agentsEnabled.toggle()
+        updateFeatureChecks()
+    }
+
+    @objc private func toggleNotify() {
+        state.notifyOnWaiting.toggle()
+        updateFeatureChecks()
+    }
+
+    private func updateFeatureChecks() {
+        mediaToggleItem?.state = state.mediaEnabled ? .on : .off
+        batteryToggleItem?.state = state.batteryEnabled ? .on : .off
+        agentsToggleItem?.state = state.agentsEnabled ? .on : .off
+        notifyToggleItem?.state = state.notifyOnWaiting ? .on : .off
+        // The notify sub-option only applies while AI Agents is on.
+        notifyToggleItem?.isEnabled = state.agentsEnabled
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -85,7 +142,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu === energyModeMenu else { return }
-        updateEnergyModeChecks(services.powerMode.currentMode())
+        if menu === energyModeMenu {
+            updateEnergyModeChecks(services.powerMode.currentMode())
+        } else {
+            updateFeatureChecks()
+        }
     }
 }

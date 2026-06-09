@@ -23,6 +23,6 @@
     <key>NSHumanReadableCopyright</key>
     <string>Islet</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Islet uses Apple Events to read now-playing info and control playback in Music and Spotify.</string>
+    <string>Islet uses Apple Events to read now-playing info and control playback in Music and Spotify, and to bring an agent's terminal window to the front when you click its row.</string>
 </dict>
 </plist>

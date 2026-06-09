@@ -23,13 +23,22 @@ final class NotchWindowController {
         self.layout = IslandLayout(geometry: state.geometry)
         buildWindow()
         observeScreenChanges()
+        observeFeatureToggles()
         resolveGeometry()
+    }
+
+    /// Builds the layout from the current geometry and the live feature toggles, which decide
+    /// whether the expanded panel reserves its top content row.
+    private func makeLayout() -> IslandLayout {
+        IslandLayout(geometry: state.geometry,
+                     mediaEnabled: state.mediaEnabled,
+                     batteryEnabled: state.batteryEnabled)
     }
 
     // MARK: - Setup
 
     private func buildWindow() {
-        layout = IslandLayout(geometry: state.geometry)
+        layout = makeLayout()
         window = NotchWindow(contentRect: layout.windowFrame)
 
         container = IslandContainerView(frame: CGRect(origin: .zero, size: layout.windowSize))
@@ -54,12 +63,28 @@ final class NotchWindowController {
             .store(in: &cancellables)
     }
 
+    /// Toggling media/battery can collapse or restore the panel's content row, which changes the
+    /// reserved window height — so re-apply the layout (and window frame) when those flags change.
+    private func observeFeatureToggles() {
+        state.$mediaEnabled.combineLatest(state.$batteryEnabled)
+            .map { [$0, $1] }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.applyLayout() }
+            .store(in: &cancellables)
+    }
+
     // MARK: - Geometry
 
     func resolveGeometry() {
-        let geometry = NotchGeometry.resolve()
-        state.geometry = geometry
-        layout = IslandLayout(geometry: geometry)
+        state.geometry = NotchGeometry.resolve()
+        applyLayout()
+    }
+
+    /// Rebuilds the layout from current geometry + toggles and resizes the window/container to match.
+    private func applyLayout() {
+        layout = makeLayout()
         window.setFrame(layout.windowFrame, display: true)
         container.frame = CGRect(origin: .zero, size: layout.windowSize)
         container.updateTrackingAreas()
@@ -71,17 +96,19 @@ final class NotchWindowController {
     func currentInteractiveRect() -> CGRect {
         switch state.mode {
         case .collapsed: return layout.collapsedRect(width: currentCollapsedWidth())
-        case .expanded:  return layout.expandedRect
+        case .expanded:  return layout.expandedVisibleRect(sessionCount: state.visibleAgentSessions.count)
         }
     }
 
     /// Visual width of the collapsed island, mirroring `IslandRootView`'s presentation precedence
-    /// (volume HUD > peek > now-playing compact > bare pill) so hit/hover rects match the pixels.
+    /// (volume HUD > peek > agent live > now-playing compact > bare pill) so hit/hover rects match
+    /// the pixels.
     private func currentCollapsedWidth() -> CGFloat {
         let notchWidth = state.geometry.notchWidth
         if state.volumeHUD != nil { return notchWidth + 200 }             // volume HUD
         if state.currentActivity != nil { return notchWidth + 220 }       // peek
-        if state.nowPlaying.hasContent { return layout.compactWidth }     // now-playing ears
+        if state.hasActiveAgents { return layout.compactWidth }           // agent ears
+        if state.nowPlayingActive { return layout.compactWidth }          // now-playing ears
         return notchWidth                                                  // bare pill
     }
 

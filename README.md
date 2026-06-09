@@ -14,6 +14,20 @@ Built with Swift Package Manager — no Xcode project required.
   needed and there's no polling.
 - **Now Playing** — title/artist + play-pause / next / previous for **Music** and **Spotify**,
   driven by each app's distributed notifications for instant updates (with a slow timer fallback).
+- **AI agent status** — a live indicator flanks the notch while **Claude Code** and/or **Cursor**
+  agents are actively working (tool glyphs + a "thinking" pulse + session count). The pulse turns
+  amber when an agent is waiting for input. Hover to see a clean, label-free agent overview: a slim
+  working / waiting summary above per-session rows (keyed by project, with a live "what it's doing"
+  line and elapsed time), sessions awaiting input floated to the top. Detection is hook-driven —
+  see *AI agent tracking* below. The overview doubles as a control surface:
+  - **Click a row to jump to that agent** — Islet brings the owning window to the front: Cursor's
+    workspace window, or the exact terminal tab (Apple Terminal by tty, iTerm2 by session id),
+    falling back to simply activating the app.
+  - **Waiting alerts** — when an agent newly needs input, the island flashes amber and (optionally)
+    a Notification Center banner + sound fires. Tap the notification to jump straight to the agent.
+    Toggle this under *AI Agents → Notify on waiting* in the menu-bar menu.
+  - **Stuck detection** — a working session that goes quiet too long shows its elapsed time in
+    amber, so a wedged or long-running agent stands out at a glance.
 - **Live activity peeks** — brief notch-flanking peeks for track changes and power events.
 - **Automatic light / dark** — the expanded panel follows the system appearance and switches
   live. The collapsed pill and peeks stay dark on purpose so they blend with the physical notch.
@@ -50,6 +64,41 @@ macOS ties Automation grants to the app's bundle id + code signature. `bundle.sh
 **stable** identity on every build so grants survive rebuilds. If a grant ever gets dropped after a
 rebuild, just re-approve it in Automation settings.
 
+## AI agent tracking (Claude Code + Cursor)
+
+The agent indicator is driven by lightweight **hooks** that each tool runs on its agent lifecycle
+events. The hooks write a small per-session JSON status file; Islet watches those directories with
+FSEvents (event-driven, no polling at rest) and shows the *active* sessions.
+
+- **Claude Code** → `~/.claude/agent-tui-state/<session>.json`. The `Stop` event marks a session
+  done, `Notification` marks it waiting for input, and tool/prompt events mark it working. The
+  writer also records a short, privacy-safe activity phrase (a tool name plus a file basename or a
+  command's program token — never full prompts or arguments) and best-effort focus hints (the
+  hosting app's bundle id, terminal session id, and tty) used for click-to-focus.
+- **Cursor** → `~/.cursor/agent-status/<conversation>.json`, written on `beforeSubmitPrompt`
+  (working), `afterFileEdit` / `beforeShellExecution` (working + activity), and `stop` (done).
+
+The first time you click a row that targets **Apple Terminal** or **iTerm2**, macOS prompts to
+allow Islet to control that app (Automation). Approve it in *System Settings → Privacy & Security →
+Automation*; until then, clicking still brings the app forward but can't select the exact tab.
+Focusing **Cursor** needs no extra permission. A waiting alert also asks for Notification permission
+the first time it would fire.
+
+Install the hooks once (idempotent and non-destructive — it backs up and preserves any existing
+hooks):
+
+```bash
+Integrations/agent-hooks/install.sh
+```
+
+This copies the writer scripts into `~/.claude/hooks/` and `~/.cursor/hooks/`, adds the missing
+Claude Code hook entries (`UserPromptSubmit`/`Notification`/`SubagentStop`), and creates/merges
+`~/.cursor/hooks.json`. Claude Code applies the hooks to newly started sessions; Cursor reloads
+`hooks.json` on save. No extra macOS permissions are required (FSEvents on your own directories).
+
+A session is shown as working only while its status file was updated recently (a short TTL), so a
+turn that ends without a terminal event still clears on its own.
+
 ## Why not MediaRemote?
 
 Reading system-wide now-playing info historically used the private `MediaRemote` framework. As of
@@ -74,13 +123,18 @@ Sources/Islet/
     NotchWindowController.swift     hover→expand/collapse, screen-reconfig handling
     FullScreenObserver.swift       hides island when another app is full-screen
   UI/
-    IslandRootView.swift           morphs between collapsed / peek / expanded
+    IslandRootView.swift           morphs between collapsed / peek / agent-live / expanded
     CompactView.swift              activity peek (flanks the notch)
-    ExpandedView.swift             now-playing + battery
+    AgentViews.swift               agent live ear + expanded "AI Agents" section
+    ExpandedView.swift             now-playing + battery + AI agents
   Services/
     MediaService.swift             AppleScript + distributed-notification observers
     BatteryService.swift           IOKit power sources (event-driven)
+    AgentStatusService.swift       FSEvents watcher for Claude Code / Cursor agent status
+    AgentFocusService.swift        click-to-focus: raises the agent's terminal tab / editor window
+    AgentNotificationService.swift Notification Center alert + sound when an agent starts waiting
     ActivityCenter.swift           drives transient live-activity peeks
 Resources/Info.plist               LSUIElement + stable CFBundleIdentifier + usage strings
+Integrations/agent-hooks/          Claude Code + Cursor hook scripts + idempotent install.sh
 bundle.sh                          build + assemble + ad-hoc codesign
 ```
