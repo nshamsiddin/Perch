@@ -42,10 +42,16 @@ final class AgentFocusService {
     }
 
     private func cursorAppURL() -> URL? {
-        // Prefer a running instance's bundle id; otherwise look it up by the conventional id / name.
-        if let running = NSWorkspace.shared.runningApplications.first(where: {
-            ($0.bundleIdentifier ?? "").lowercased().contains("cursor") ||
-            ($0.localizedName ?? "").lowercased() == "cursor"
+        // Prefer a running instance — but only the real foreground app. Cursor ships helper XPC
+        // services like `CursorUIViewService.xpc` whose names contain "Cursor"; matching one of
+        // those and trying to open its `.xpc` bundle is what produced the "damaged or incomplete"
+        // error. So require a `.regular` activation policy and an actual `.app` bundle.
+        if let running = NSWorkspace.shared.runningApplications.first(where: { app in
+            guard app.activationPolicy == .regular,
+                  let url = app.bundleURL, url.pathExtension == "app" else { return false }
+            let id = (app.bundleIdentifier ?? "").lowercased()
+            let name = (app.localizedName ?? "").lowercased()
+            return id.contains("cursor") || name == "cursor"
         }), let url = running.bundleURL {
             return url
         }
@@ -98,9 +104,12 @@ final class AgentFocusService {
     @discardableResult
     private func activateRunning(matching keyword: String) -> Bool {
         let key = keyword.lowercased()
-        guard let app = NSWorkspace.shared.runningApplications.first(where: {
-            ($0.bundleIdentifier ?? "").lowercased().contains(key) ||
-            ($0.localizedName ?? "").lowercased().contains(key)
+        // Only consider real foreground apps, so a matching helper/XPC service (e.g. Cursor's
+        // `CursorUIViewService`) is never the thing we try to activate.
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { app in
+            guard app.activationPolicy == .regular else { return false }
+            return (app.bundleIdentifier ?? "").lowercased().contains(key) ||
+                   (app.localizedName ?? "").lowercased().contains(key)
         }) else { return false }
         return app.activate(options: [.activateAllWindows])
     }
