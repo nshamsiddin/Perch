@@ -9,7 +9,7 @@ final class NotchWindowController {
     private let services: AppServices
     private var window: NotchWindow!
     private var container: IslandContainerView!
-    private var hostingView: NSHostingView<IslandRootView>!
+    private var hostingView: IslandHostingView<IslandRootView>!
 
     private var layout: IslandLayout
     private var collapseWorkItem: DispatchWorkItem?
@@ -45,7 +45,7 @@ final class NotchWindowController {
         container.controller = self
         container.autoresizingMask = [.width, .height]
 
-        hostingView = NSHostingView(rootView: IslandRootView(state: state, services: services))
+        hostingView = IslandHostingView(rootView: IslandRootView(state: state, services: services))
         hostingView.frame = container.bounds
         hostingView.autoresizingMask = [.width, .height]
         // Let the AppKit container own hit-testing/click-through.

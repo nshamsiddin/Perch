@@ -1,4 +1,12 @@
 import AppKit
+import SwiftUI
+
+/// SwiftUI host that accepts first mouse so buttons fire on the first click while the overlay
+/// window is inactive. `acceptsFirstMouse` on the outer container does not help — hit-testing
+/// lands on the hosting view, not its superview.
+final class IslandHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
 
 /// Hosts the SwiftUI island and implements two AppKit behaviors SwiftUI can't do alone:
 ///   1. Click-through: hit-testing only claims points inside the current island shape,
