@@ -162,7 +162,8 @@ final class MediaService {
         else { return }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] _, _ in
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] app, _ in
+            app?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self?.refresh() }
         }
     }
@@ -182,7 +183,9 @@ final class MediaService {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { app, _ in
+            app?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
     }
 
     private func sendCommand(_ command: String) {

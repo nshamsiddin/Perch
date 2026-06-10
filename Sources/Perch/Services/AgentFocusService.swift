@@ -32,12 +32,17 @@ final class AgentFocusService {
     private func focusCursorWorkspace(cwd: String) -> Bool {
         guard !cwd.isEmpty else { return activateRunning(matching: "cursor") }
         let folder = URL(fileURLWithPath: cwd, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: folder.path) else {
+            return activateRunning(matching: "cursor")
+        }
         guard let cursorURL = cursorAppURL() else {
             return activateRunning(matching: "cursor")
         }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
-        NSWorkspace.shared.open([folder], withApplicationAt: cursorURL, configuration: config)
+        NSWorkspace.shared.open([folder], withApplicationAt: cursorURL, configuration: config) { app, _ in
+            app?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
         return true
     }
 
@@ -94,11 +99,14 @@ final class AgentFocusService {
 
     // MARK: - App activation
 
+    private static let activateOptions: NSApplication.ActivationOptions =
+        [.activateAllWindows, .activateIgnoringOtherApps]
+
     @discardableResult
     private func activate(bundleID: String) -> Bool {
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-        guard let app = apps.first else { return false }
-        return app.activate(options: [.activateAllWindows])
+        guard let app = apps.first(where: { $0.activationPolicy == .regular }) else { return false }
+        return app.activate(options: Self.activateOptions)
     }
 
     @discardableResult
@@ -107,11 +115,12 @@ final class AgentFocusService {
         // Only consider real foreground apps, so a matching helper/XPC service (e.g. Cursor's
         // `CursorUIViewService`) is never the thing we try to activate.
         guard let app = NSWorkspace.shared.runningApplications.first(where: { app in
-            guard app.activationPolicy == .regular else { return false }
+            guard app.activationPolicy == .regular,
+                  let url = app.bundleURL, url.pathExtension == "app" else { return false }
             return (app.bundleIdentifier ?? "").lowercased().contains(key) ||
                    (app.localizedName ?? "").lowercased().contains(key)
         }) else { return false }
-        return app.activate(options: [.activateAllWindows])
+        return app.activate(options: Self.activateOptions)
     }
 
     // MARK: - AppleScript tab selection

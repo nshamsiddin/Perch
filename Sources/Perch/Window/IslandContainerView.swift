@@ -14,6 +14,15 @@ final class IslandContainerView: NSView {
 
     override var isFlipped: Bool { false } // bottom-left origin to match layout math
 
+    /// Perch is an accessory (menu-bar) app with a borderless overlay window. Without this, the
+    /// first click is swallowed keying the window and SwiftUI buttons (agent rows, media) never fire.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKey()
+        super.mouseDown(with: event)
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let controller else { return nil }
         let activeRect = controller.currentInteractiveRect()
