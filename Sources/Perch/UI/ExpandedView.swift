@@ -371,9 +371,11 @@ private struct BatteryView: View {
     var body: some View {
         if state.batteryActive {
             HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(tint)
+                BatteryGaugeIcon(
+                    percentage: max(state.battery.percentage, 0),
+                    isCharging: state.battery.isCharging,
+                    theme: theme
+                )
                 Text("\(max(state.battery.percentage, 0))%")
                     .font(.system(size: 12, weight: .semibold))
                     .monospacedDigit()
@@ -384,21 +386,81 @@ private struct BatteryView: View {
             .background(Capsule().fill(theme.controlFill))
         }
     }
+}
 
-    private var symbol: String {
-        if state.battery.isCharging { return "battery.100.bolt" }
-        switch state.battery.percentage {
-        case ..<15: return "battery.0"
-        case ..<40: return "battery.25"
-        case ..<65: return "battery.50"
-        case ..<90: return "battery.75"
-        default: return "battery.100"
-        }
+/// Horizontal battery gauge: fill width tracks percentage; charging overlays a pulsing bolt.
+private struct BatteryGaugeIcon: View {
+    let percentage: Int
+    let isCharging: Bool
+    let theme: IslandTheme
+
+    @State private var boltOpacity: Double = 0.35
+
+    private static let bodyWidth: CGFloat = 24
+    private static let bodyHeight: CGFloat = 12
+    private static let capWidth: CGFloat = 2.5
+    private static let innerPadding: CGFloat = 2
+
+    private var fillFraction: CGFloat {
+        CGFloat(min(100, max(0, percentage))) / 100
     }
 
-    private var tint: Color {
-        if state.battery.isCharging { return .green }
-        return state.battery.percentage < 15 ? .red : theme.neutralTint
+    private var fillColor: Color {
+        if isCharging { return Color.green }
+        if percentage < 15 { return .red }
+        return theme.neutralTint.opacity(0.5)
+    }
+
+    private var innerFillWidth: CGFloat {
+        let track = Self.bodyWidth - 2 * Self.innerPadding
+        return max(0, track * fillFraction)
+    }
+
+    var body: some View {
+        HStack(spacing: 1.5) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                    .strokeBorder(theme.neutralTint.opacity(0.45), lineWidth: 1.1)
+
+                HStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(fillColor)
+                        .frame(width: innerFillWidth, height: Self.bodyHeight - 2 * Self.innerPadding)
+                        .animation(.easeInOut(duration: 0.35), value: percentage)
+                    Spacer(minLength: 0)
+                }
+                .padding(Self.innerPadding)
+
+                if isCharging {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .green.opacity(0.85), radius: 2)
+                        .opacity(boltOpacity)
+                }
+            }
+            .frame(width: Self.bodyWidth, height: Self.bodyHeight)
+
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(theme.neutralTint.opacity(0.4))
+                .frame(width: Self.capWidth, height: 5)
+        }
+        .frame(width: Self.bodyWidth + Self.capWidth + 1.5, height: Self.bodyHeight)
+        .onAppear { syncBoltAnimation() }
+        .onChange(of: isCharging) { _ in syncBoltAnimation() }
+    }
+
+    private func syncBoltAnimation() {
+        if isCharging {
+            boltOpacity = 0.35
+            withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
+                boltOpacity = 1.0
+            }
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) {
+                boltOpacity = 1.0
+            }
+        }
     }
 }
 
