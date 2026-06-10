@@ -67,20 +67,33 @@ struct IslandLayout {
     var agentApprovalRowHeight: CGFloat { 64 }
     var agentsMoreLineHeight: CGFloat { 16 }
     var agentsRowsMax: Int { 3 }
+    /// Max height for the scrollable overflow list when "+N more" is expanded.
+    var agentsOverflowScrollMaxHeight: CGFloat {
+        CGFloat(agentsRowsMax + 1) * agentRowHeight + agentsMoreLineHeight
+    }
 
     /// Height of the agents block for a given active-session count (0 when none). `approvalCount` is
     /// how many of those rows are blocking on an approval (they float to the top and are taller).
     /// The "Agents" title + status pills live in the reserved notch strip (see `ExpandedView`), so
     /// this section reserves only the rows themselves — no in-section header height.
-    func agentsSectionHeight(sessionCount: Int, approvalCount: Int = 0) -> CGFloat {
+    func agentsSectionHeight(sessionCount: Int, approvalCount: Int = 0, overflowExpanded: Bool = false) -> CGFloat {
         guard sessionCount > 0 else { return 0 }
-        let rows = min(sessionCount, agentsRowsMax)
+        let hasOverflow = sessionCount > agentsRowsMax
+        let rows: Int
+        if overflowExpanded && hasOverflow {
+            rows = min(sessionCount, agentsRowsMax + 2)
+        } else {
+            rows = min(sessionCount, agentsRowsMax)
+        }
         let approvals = min(max(approvalCount, 0), rows)
         let normal = rows - approvals
-        let more: CGFloat = sessionCount > agentsRowsMax ? agentsMoreLineHeight : 0
+        let more: CGFloat = hasOverflow ? agentsMoreLineHeight : 0
+        let scrollExtra: CGFloat = (overflowExpanded && hasOverflow)
+            ? agentsOverflowScrollMaxHeight - CGFloat(min(sessionCount, agentsRowsMax)) * agentRowHeight
+            : 0
         return agentsSectionTopInset
             + CGFloat(approvals) * agentApprovalRowHeight
-            + CGFloat(normal) * agentRowHeight + more
+            + CGFloat(normal) * agentRowHeight + more + scrollExtra
     }
 
     /// The window always reserves room for the *largest* agents section (incl. the "+N more" line),

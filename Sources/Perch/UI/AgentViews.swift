@@ -192,6 +192,10 @@ struct AgentsSectionView: View {
     var onDeny: (AgentSession) -> Void = { _ in }
     /// Best-effort stop of a running agent.
     var onStop: (AgentSession) -> Void = { _ in }
+    /// Whether gating is currently snoozed (shown as a subtle header chip).
+    var gatingPaused: Bool = false
+
+    @State private var overflowExpanded = false
 
     /// Waiting sessions first (they need attention), just-finished sessions last (they're winding
     /// down), working sessions in between — preserving the upstream order within each group.
@@ -202,6 +206,10 @@ struct AgentsSectionView: View {
     }
     private var workingCount: Int { sessions.lazy.filter(\.isWorking).count }
     private var waitingCount: Int { sessions.lazy.filter(\.isWaiting).count }
+    private var overflowCount: Int { max(0, sessions.count - layout.agentsRowsMax) }
+    private var visibleSessions: [AgentSession] {
+        overflowExpanded ? ordered : Array(ordered.prefix(layout.agentsRowsMax))
+    }
 
     var body: some View {
         // One shared clock drives every row's relative time, so "2m" ticks up live without the
@@ -213,20 +221,22 @@ struct AgentsSectionView: View {
                     summary
                         .frame(height: layout.agentsHeaderHeight)
                 }
-                ForEach(ordered.prefix(layout.agentsRowsMax)) { session in
-                    AgentRowView(session: session, now: now, theme: theme,
-                                 controlEnabled: controlEnabled,
-                                 onTap: onFocus, onApprove: onApprove,
-                                 onDeny: onDeny, onStop: onStop)
-                        .frame(height: session.isAwaitingApproval
-                               ? layout.agentApprovalRowHeight : layout.agentRowHeight)
+                if overflowExpanded && overflowCount > 0 {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(visibleSessions) { session in
+                                agentRow(session: session, now: now)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: layout.agentsOverflowScrollMaxHeight)
+                } else {
+                    ForEach(visibleSessions) { session in
+                        agentRow(session: session, now: now)
+                    }
                 }
-                if sessions.count > layout.agentsRowsMax {
-                    Text("+\(sessions.count - layout.agentsRowsMax) more")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(theme.tertiaryText)
-                        .frame(height: layout.agentsMoreLineHeight, alignment: .leading)
-                        .padding(.leading, 32)
+                if overflowCount > 0 {
+                    overflowToggle
                 }
             }
         }
@@ -234,6 +244,34 @@ struct AgentsSectionView: View {
         // Inset the right-aligned status text so it lines up with the battery chip's text (which
         // sits chipHorizontalPadding in from the panel edge).
         .padding(.trailing, layout.chipHorizontalPadding)
+    }
+
+    @ViewBuilder
+    private func agentRow(session: AgentSession, now: Date) -> some View {
+        AgentRowView(session: session, now: now, theme: theme,
+                     controlEnabled: controlEnabled,
+                     onTap: onFocus, onApprove: onApprove,
+                     onDeny: onDeny, onStop: onStop)
+            .frame(height: session.isAwaitingApproval
+                   ? layout.agentApprovalRowHeight : layout.agentRowHeight)
+    }
+
+    private var overflowToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { overflowExpanded.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: overflowExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                Text(overflowExpanded ? "Show less" : "+\(overflowCount) more")
+                    .font(.system(size: 10.5, weight: .medium))
+            }
+            .foregroundStyle(theme.secondaryText)
+            .frame(height: layout.agentsMoreLineHeight, alignment: .leading)
+            .padding(.leading, 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Section header. Mirrors a row's geometry exactly — a glyph in the 18pt icon rail, then a
@@ -253,10 +291,29 @@ struct AgentsSectionView: View {
 
             Spacer(minLength: 0)
 
+            if gatingPaused {
+                GatingPausedChip()
+            }
             AgentStatusPills(waitingCount: waitingCount, workingCount: workingCount)
                 .padding(.trailing, 6)
         }
         .padding(.leading, 6)
+    }
+}
+
+/// Subtle chip shown while gating is snoozed — agents proceed without island approval.
+struct GatingPausedChip: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 8, weight: .bold))
+            Text("Paused")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.secondary.opacity(0.14)))
     }
 }
 

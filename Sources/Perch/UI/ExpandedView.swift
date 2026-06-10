@@ -17,7 +17,8 @@ struct ExpandedView: View {
             // clock used to be), flanking the camera housing via a center spacer of notchWidth.
             AgentsNotchHeaderView(sessions: state.visibleAgentSessions,
                                   notchWidth: state.geometry.notchWidth,
-                                  theme: theme)
+                                  theme: theme,
+                                  gatingPaused: state.isGatingPaused && state.agentsControlActive)
                 .frame(height: state.geometry.notchHeight)
 
             // Agent session rows lead the panel body, directly under their header in the strip.
@@ -31,7 +32,8 @@ struct ExpandedView: View {
                                       onFocus: { services.focusAgent($0) },
                                       onApprove: { services.approveAgent($0, note: $1) },
                                       onDeny: { services.denyAgent($0) },
-                                      onStop: { services.stopAgent($0) })
+                                      onStop: { services.stopAgent($0) },
+                                      gatingPaused: state.isGatingPaused && state.agentsControlActive)
                 }
                 .transition(.opacity)
             }
@@ -95,6 +97,7 @@ private struct AgentsNotchHeaderView: View {
     let sessions: [AgentSession]
     let notchWidth: CGFloat
     let theme: IslandTheme
+    var gatingPaused: Bool = false
 
     private var workingCount: Int { sessions.lazy.filter(\.isWorking).count }
     private var waitingCount: Int { sessions.lazy.filter(\.isWaiting).count }
@@ -126,6 +129,7 @@ private struct AgentsNotchHeaderView: View {
                     Spacer().frame(width: notchWidth)
 
                     HStack(spacing: 6) {
+                        if gatingPaused { GatingPausedChip() }
                         if stuckCount(now: context.date) > 0 {
                             StuckChip(count: stuckCount(now: context.date))
                         }
