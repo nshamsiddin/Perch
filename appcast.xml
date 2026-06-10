@@ -5,5 +5,15 @@
         <link>https://github.com/nshamsiddin/Perch</link>
         <description>Most recent updates to Perch</description>
         <language>en</language>
+        <item>
+            <title>Version 1.0.3</title>
+            <sparkle:version>1.0.3</sparkle:version>
+            <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
+            <pubDate>Wed, 10 Jun 2026 11:13:27 +0000</pubDate>
+            <enclosure url="https://github.com/nshamsiddin/Perch/releases/download/v1.0.3/Perch-v1.0.3.dmg"
+                       sparkle:edSignature="Dl74H/wXm6VZpgGOWjl/lDOG0UcTY2FIroPKDU09DwHut7XEr30MqmZBJ654daW8x40HWFBd7YlQp8ggYX+FAA=="
+                       length="1686678"
+                       type="application/octet-stream" />
+        </item>
     </channel>
 </rss>

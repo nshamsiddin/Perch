@@ -51,9 +51,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          APPCAST_TMP="$(mktemp)"
+          cp appcast.xml "$APPCAST_TMP"
           git fetch origin master
           git checkout master
-          cp "$GITHUB_WORKSPACE/appcast.xml" appcast.xml
+          cp "$APPCAST_TMP" appcast.xml
+          rm -f "$APPCAST_TMP"
           git add appcast.xml
           if git diff --staged --quiet; then
             echo "appcast.xml unchanged"
