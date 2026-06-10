@@ -54,6 +54,29 @@ Built with Swift Package Manager — no Xcode project required.
 - Swift toolchain (Command Line Tools are enough to **build & run**; running the **tests** needs
   full Xcode, since `XCTest` ships with Xcode — see *Tests* below)
 
+## Install
+
+Download the latest `Perch-<version>.dmg` from the
+[Releases](https://github.com/nshamsiddin/Perch/releases) page, open it, and drag **Perch** into
+your Applications folder.
+
+Perch is **ad-hoc signed**, not signed with an Apple Developer ID, so the first launch needs one
+extra step to get past Gatekeeper:
+
+- Right-click `Perch.app` → **Open** → **Open** (only needed once), or
+- clear the download quarantine flag: `xattr -dr com.apple.quarantine /Applications/Perch.app`
+
+### Build a DMG yourself
+
+```bash
+chmod +x dmg.sh
+./dmg.sh
+```
+
+`dmg.sh` runs `bundle.sh` and packages `Perch.dmg`. It uses
+[`create-dmg`](https://github.com/create-dmg/create-dmg) (`brew install create-dmg`) for a styled
+drag-to-Applications window if it's installed, and otherwise falls back to a plain `hdiutil` image.
+
 ## Build & run
 
 ```bash
@@ -220,6 +243,8 @@ Resources/Info.plist               LSUIElement + stable CFBundleIdentifier + usa
 Integrations/agent-hooks/          Claude Code + Cursor hook scripts + install.sh / uninstall.sh
 scripts/uninstall-powermode.sh     standalone removal of the Energy Mode root helper
 bundle.sh                          build + assemble + ad-hoc codesign
+dmg.sh                             package Perch.app into a distributable Perch.dmg
+.github/workflows/                 CI (build + test + bundle) and Release (DMG on v* tags)
 ```
 
 ## License
