@@ -87,17 +87,24 @@ struct NowPlayingCompactView: View {
     let artwork: NSImage?
     let notchWidth: CGFloat
     let earWidth: CGFloat
+    /// Opens the app that owns the current track (Spotify / Music).
+    var onTap: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 0) {
-            leftEar
-                .frame(width: earWidth)
+        Button(action: onTap) {
+            HStack(spacing: 0) {
+                leftEar
+                    .frame(width: earWidth)
 
-            Spacer().frame(width: notchWidth)
+                Spacer().frame(width: notchWidth)
 
-            rightEar
-                .frame(width: earWidth)
+                rightEar
+                    .frame(width: earWidth)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(nowPlaying.source.isEmpty ? "Open player" : "Open \(nowPlaying.source)")
     }
 
     /// Album-art thumbnail when available, else a small music glyph; nudged toward the notch.

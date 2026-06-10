@@ -131,7 +131,8 @@ struct IslandRootView: View {
                 nowPlaying: state.nowPlaying,
                 artwork: state.artwork,
                 notchWidth: state.geometry.notchWidth,
-                earWidth: layout.earWidth
+                earWidth: layout.earWidth,
+                onTap: { services.media.openCurrentSource() }
             )
             .transition(.opacity)
         case .agentLive:
