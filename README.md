@@ -89,6 +89,46 @@ open Perch.app
 Dock icon), and **ad-hoc code-signs** it with a stable bundle identifier. Quit anytime from the
 menu-bar icon.
 
+## Updates
+
+Perch checks for updates automatically (once per day) via
+[Sparkle](https://sparkle-project.org/). You can also trigger a check from the menu-bar icon →
+**Check for Updates…**.
+
+The app reads its feed from a stable URL:
+
+`https://raw.githubusercontent.com/nshamsiddin/Perch/master/appcast.xml`
+
+Each `v*` release workflow builds a signed appcast entry, attaches `appcast.xml` to the GitHub
+release, and commits the latest feed to `master` so the raw URL always points at the newest
+version.
+
+### Maintainer setup (one time)
+
+Generate an EdDSA key pair with Sparkle's tools (included after `swift package resolve`):
+
+```bash
+swift package resolve
+.build/artifacts/sparkle/Sparkle/bin/generate_keys
+```
+
+- **Public key** → GitHub Actions secret `SPARKLE_PUBLIC_KEY` (stamped into `SUPublicEDKey` at
+  release build time). The public key is safe to commit if you prefer.
+- **Private key** → GitHub Actions secret `SPARKLE_PRIVATE_KEY` (used by
+  `scripts/generate-appcast.sh` to sign each DMG). **Never commit the private key.**
+
+Add both secrets under *Settings → Secrets and variables → Actions* on the GitHub repo before
+cutting the first Sparkle-enabled release.
+
+### Limitations
+
+- Perch is still **ad-hoc signed**, not signed with an Apple Developer ID. Sparkle can download
+  and install updates, but macOS Gatekeeper may still warn on first install (right-click → Open,
+  or clear the quarantine flag — see *Install* above). Developer ID signing and notarization are
+  separate follow-ups.
+- Builds without `SPARKLE_PUBLIC_KEY` / a signed appcast cannot verify updates; local `./bundle.sh`
+  builds behave this way by design.
+
 ## Permissions
 
 - **Automation (Apple Events)** — the first time Perch reads or controls Music/Spotify, macOS
@@ -237,9 +277,12 @@ Sources/Perch/
     AgentFocusService.swift        click-to-focus: raises the agent's terminal tab / editor window
     AgentNotificationService.swift Notification Center alert + sound when an agent starts waiting
     AgentCommandService.swift      writes approve/deny/stop decisions + gating config (Control)
+    UpdateService.swift            Sparkle auto-update controller
     ActivityCenter.swift           drives transient live-activity peeks
 Tests/PerchTests/                  unit tests for the pure validation / parsing / layout logic
 Resources/Info.plist               LSUIElement + stable CFBundleIdentifier + usage strings
+appcast.xml                        Sparkle feed (updated by the release workflow)
+scripts/generate-appcast.sh        signs the release DMG and writes appcast.xml
 Integrations/agent-hooks/          Claude Code + Cursor hook scripts + install.sh / uninstall.sh
 scripts/uninstall-powermode.sh     standalone removal of the Energy Mode root helper
 bundle.sh                          build + assemble + ad-hoc codesign
