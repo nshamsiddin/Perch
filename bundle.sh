@@ -28,6 +28,15 @@ mkdir -p "$MACOS_DIR" "$RES_DIR"
 cp "$BIN_PATH/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 cp "$ROOT/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 
+# Stamp a release version into the BUNDLED plist only. Releases derive PERCH_VERSION
+# from the git tag, so the installed app reports the tagged version while the tracked
+# Resources/Info.plist keeps its default for ordinary local builds.
+if [ -n "${PERCH_VERSION:-}" ]; then
+    echo "==> Stamping version $PERCH_VERSION into bundled Info.plist…"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $PERCH_VERSION" "$APP_DIR/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $PERCH_VERSION" "$APP_DIR/Contents/Info.plist"
+fi
+
 echo "==> Ad-hoc code-signing (stable identity for TCC)…"
 codesign --force --deep --sign - \
     --identifier "$BUNDLE_ID" \
