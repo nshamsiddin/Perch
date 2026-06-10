@@ -281,7 +281,7 @@ struct AgentStatusPills: View {
             }
             if workingCount > 0 {
                 AgentCountChip(color: .green, count: workingCount,
-                               label: compact ? nil : "working")
+                               label: compact ? nil : "working", animated: true)
             }
         }
     }
@@ -294,12 +294,18 @@ struct AgentCountChip: View {
     let color: Color
     let count: Int
     var label: String? = nil
+    /// Working chips carry the live beacon; waiting chips stay a quiet static dot.
+    var animated: Bool = false
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
+            if animated {
+                WorkingDot(color: color, size: 6)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+            }
             Text(label.map { "\(count) \($0)" } ?? "\(count)")
                 .font(.system(size: 11, weight: .semibold))
                 .monospacedDigit()
@@ -308,6 +314,43 @@ struct AgentCountChip: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(Capsule().fill(color.opacity(0.14)))
+    }
+}
+
+/// The "actively working" beacon that replaces the static green dot wherever a session is running:
+/// a steady green core emitting soft rings that swell outward and fade. It borrows Apple's live /
+/// locating idiom (Find My's pulsing pin, AirDrop's radar) to say "this agent is transmitting right
+/// now" without shouting. Only scale + opacity animate — GPU-cheap and smooth — and the rings draw
+/// *outside* the core's fixed frame, so the beacon occupies exactly the footprint of the dot it
+/// replaces and never nudges the surrounding layout. Two rings ride half a period out of phase so
+/// the emission stays continuous instead of pulsing with a visible gap between cycles.
+struct WorkingDot: View {
+    var color: Color = .green
+    var size: CGFloat = 6
+    @State private var animating = false
+
+    private static let period = 1.8
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<2, id: \.self) { ring in
+                Circle()
+                    .stroke(color, lineWidth: 1)
+                    .scaleEffect(animating ? 2.6 : 1)
+                    .opacity(animating ? 0 : 0.5)
+                    .animation(.easeOut(duration: Self.period)
+                        .repeatForever(autoreverses: false)
+                        .delay(Double(ring) * Self.period / 2),
+                        value: animating)
+            }
+            Circle()
+                .fill(color)
+                // A soft constant glow gives the core presence between ripples, so the dot itself
+                // reads as alive rather than a flat disc waiting for the next ring.
+                .shadow(color: color.opacity(0.6), radius: 1.5)
+        }
+        .frame(width: size, height: size)
+        .onAppear { animating = true }
     }
 }
 
@@ -508,9 +551,15 @@ struct AgentStatusBadge: View {
             }
         } else {
             HStack(spacing: 5) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 6, height: 6)
+                // A healthily running agent gets the live beacon; a stuck (amber) or waiting one
+                // stays a calm static dot so "needs attention" never masquerades as smooth progress.
+                if state == .working && !stuck {
+                    WorkingDot(color: color, size: 6)
+                } else {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 6, height: 6)
+                }
                 if state == .waiting {
                     Text("Waiting")
                         .font(.system(size: 10, weight: .semibold))
