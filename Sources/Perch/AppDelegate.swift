@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recentDecisionsItem: NSMenuItem!
     private var removeHelperItem: NSMenuItem!
     private var auditWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private let updateService = UpdateService()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -131,6 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(energyItem)
 
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Settings…",
+                                action: #selector(showSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Check for Updates…",
                                 action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit Perch",
@@ -166,17 +169,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Feature toggles
 
     @objc private func toggleMedia() {
-        state.mediaEnabled.toggle()
+        state.setWidgetEnabled(.media, enabled: !state.mediaEnabled, surface: .both)
         updateFeatureChecks()
     }
 
     @objc private func toggleBattery() {
-        state.batteryEnabled.toggle()
+        state.setWidgetEnabled(.battery, enabled: !state.batteryEnabled, surface: .both)
         updateFeatureChecks()
     }
 
     @objc private func toggleAgents() {
-        state.agentsEnabled.toggle()
+        state.setWidgetEnabled(.agents, enabled: !state.agentsEnabled, surface: .both)
         updateFeatureChecks()
     }
 
@@ -208,6 +211,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func resumeGating() {
         services.resumeGating()
         updateFeatureChecks()
+    }
+
+    @objc private func showSettings() {
+        let view = SettingsView(state: state, services: services)
+        let controller = NSHostingController(rootView: view)
+        if let settingsWindow {
+            settingsWindow.contentViewController = controller
+            settingsWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let window = NSWindow(contentViewController: controller)
+        window.title = "Perch Settings"
+        window.styleMask = [.titled, .closable, .resizable]
+        window.setContentSize(NSSize(width: 480, height: 520))
+        window.center()
+        window.isReleasedWhenClosed = false
+        settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func showRecentDecisions() {

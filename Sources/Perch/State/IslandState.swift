@@ -13,9 +13,10 @@ struct NowPlaying: Equatable {
     var artist: String
     var album: String
     var isPlaying: Bool
-    var source: String // "Music" or "Spotify"
+    var source: String // display name, e.g. "Music", "Spotify", "Arc"
+    var bundleIdentifier: String? // owning app, for openCurrentSource via MediaRemote
 
-    static let empty = NowPlaying(title: "", artist: "", album: "", isPlaying: false, source: "")
+    static let empty = NowPlaying(title: "", artist: "", album: "", isPlaying: false, source: "", bundleIdentifier: nil)
 
     var hasContent: Bool { !title.isEmpty }
 }
@@ -120,6 +121,50 @@ struct AgentSession: Identifiable, Equatable {
     var isAwaitingApproval: Bool { pendingApproval != nil }
 }
 
+/// Next calendar event surfaced by `CalendarService`.
+struct CalendarEvent: Equatable {
+    var title: String
+    var start: Date
+    var end: Date
+    var location: String?
+    var eventIdentifier: String
+    var url: URL?
+}
+
+/// A captured menu bar item shown in the Ice Bar reveal strip.
+struct MenuBarRevealItem: Identifiable, Equatable {
+    let id: String
+    var title: String
+    var imageData: Data?
+}
+
+/// Camera / mic / screen-capture status from `PrivacyIndicatorService`.
+struct PrivacyStatus: Equatable {
+    var cameraActive: Bool = false
+    var micActive: Bool = false
+    var screenCaptureActive: Bool = false
+    var activeAppName: String?
+
+    var isActive: Bool { cameraActive || micActive || screenCaptureActive }
+}
+
+/// How `MediaService` sources now-playing data.
+enum MediaSourceMode: String, Codable, CaseIterable, Identifiable {
+    case universal
+    case musicSpotifyOnly
+    case off
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .universal:         return "Universal (any app)"
+        case .musicSpotifyOnly:  return "Music & Spotify only"
+        case .off:               return "Off"
+        }
+    }
+}
+
 /// A transient live-activity peek.
 struct Activity: Identifiable, Equatable {
     let id: UUID
@@ -146,6 +191,19 @@ final class IslandState: ObservableObject {
     // visibility, the window controller for sizing, and `AppServices` to start/stop the backing
     // services so a disabled feature stops doing work (timers, AppleScript prompts, file watching).
 
+    @Published var collapsedWidgetOrder: [IslandWidget] = WidgetPreferences.loadCollapsed() {
+        didSet {
+            WidgetPreferences.saveCollapsed(collapsedWidgetOrder)
+            syncLegacyTogglesFromWidgets()
+        }
+    }
+    @Published var expandedWidgetOrder: [IslandWidget] = WidgetPreferences.loadExpanded() {
+        didSet {
+            WidgetPreferences.saveExpanded(expandedWidgetOrder)
+            syncLegacyTogglesFromWidgets()
+        }
+    }
+
     @Published var mediaEnabled: Bool = IslandState.loadFlag(SettingsKey.media) {
         didSet { IslandState.saveFlag(SettingsKey.media, mediaEnabled) }
     }
@@ -154,6 +212,24 @@ final class IslandState: ObservableObject {
     }
     @Published var agentsEnabled: Bool = IslandState.loadFlag(SettingsKey.agents) {
         didSet { IslandState.saveFlag(SettingsKey.agents, agentsEnabled) }
+    }
+    @Published var calendarEnabled: Bool = IslandState.loadFlag(SettingsKey.calendar, default: false) {
+        didSet { IslandState.saveFlag(SettingsKey.calendar, calendarEnabled) }
+    }
+    @Published var privacyEnabled: Bool = IslandState.loadFlag(SettingsKey.privacy, default: false) {
+        didSet { IslandState.saveFlag(SettingsKey.privacy, privacyEnabled) }
+    }
+    @Published var clockEnabled: Bool = IslandState.loadFlag(SettingsKey.clock, default: false) {
+        didSet { IslandState.saveFlag(SettingsKey.clock, clockEnabled) }
+    }
+    @Published var menuBarRevealEnabled: Bool = IslandState.loadFlag(SettingsKey.menuBarReveal, default: false) {
+        didSet { IslandState.saveFlag(SettingsKey.menuBarReveal, menuBarRevealEnabled) }
+    }
+    @Published var mediaSourceMode: MediaSourceMode = IslandState.loadMediaSourceMode() {
+        didSet { IslandState.saveMediaSourceMode(mediaSourceMode) }
+    }
+    @Published var launchAtLogin: Bool = IslandState.loadFlag(SettingsKey.launchAtLogin, default: false) {
+        didSet { IslandState.saveFlag(SettingsKey.launchAtLogin, launchAtLogin) }
     }
     /// Whether a Notification Center alert + sound fires when an agent starts waiting for input.
     @Published var notifyOnWaiting: Bool = IslandState.loadFlag(SettingsKey.notify) {
@@ -175,9 +251,74 @@ final class IslandState: ObservableObject {
         static let media = "feature.media.enabled"
         static let battery = "feature.battery.enabled"
         static let agents = "feature.agents.enabled"
+        static let calendar = "feature.calendar.enabled"
+        static let privacy = "feature.privacy.enabled"
+        static let clock = "feature.clock.enabled"
+        static let menuBarReveal = "feature.menuBarReveal.enabled"
+        static let mediaSourceMode = "feature.media.sourceMode"
+        static let launchAtLogin = "feature.launchAtLogin"
         static let notify = "feature.agents.notify"
         static let control = "feature.agents.control"
         static let gatingPausedUntil = "feature.agents.gatingPausedUntil"
+    }
+
+    init() {
+        syncLegacyTogglesFromWidgets()
+    }
+
+    /// Keeps legacy boolean toggles aligned with widget membership for menu + services.
+    func syncLegacyTogglesFromWidgets() {
+        let collapsed = collapsedWidgetOrder
+        let expanded = expandedWidgetOrder
+        func enabled(_ w: IslandWidget) -> Bool {
+            WidgetPreferences.isEnabled(w, collapsed: collapsed, expanded: expanded)
+        }
+        if mediaEnabled != enabled(.media) { mediaEnabled = enabled(.media) }
+        if batteryEnabled != enabled(.battery) { batteryEnabled = enabled(.battery) }
+        if agentsEnabled != enabled(.agents) { agentsEnabled = enabled(.agents) }
+        if calendarEnabled != enabled(.calendar) { calendarEnabled = enabled(.calendar) }
+        if privacyEnabled != enabled(.privacy) { privacyEnabled = enabled(.privacy) }
+        if clockEnabled != enabled(.clock) { clockEnabled = enabled(.clock) }
+        if menuBarRevealEnabled != enabled(.menuBarReveal) { menuBarRevealEnabled = enabled(.menuBarReveal) }
+    }
+
+    func setWidgetEnabled(_ widget: IslandWidget, enabled: Bool, surface: WidgetSurface) {
+        var collapsed = collapsedWidgetOrder
+        var expanded = expandedWidgetOrder
+        switch surface {
+        case .collapsed:
+            if enabled, !collapsed.contains(widget) { collapsed.append(widget) }
+            if !enabled { collapsed.removeAll { $0 == widget } }
+        case .expanded:
+            if enabled, !expanded.contains(widget) { expanded.append(widget) }
+            if !enabled { expanded.removeAll { $0 == widget } }
+        case .both:
+            if enabled {
+                if !collapsed.contains(widget) { collapsed.append(widget) }
+                if !expanded.contains(widget) { expanded.append(widget) }
+            } else {
+                collapsed.removeAll { $0 == widget }
+                expanded.removeAll { $0 == widget }
+            }
+        }
+        collapsedWidgetOrder = collapsed
+        expandedWidgetOrder = expanded
+    }
+
+    enum WidgetSurface {
+        case collapsed, expanded, both
+    }
+
+    private static func loadMediaSourceMode() -> MediaSourceMode {
+        guard let raw = UserDefaults.standard.string(forKey: SettingsKey.mediaSourceMode),
+              let mode = MediaSourceMode(rawValue: raw) else {
+            return .musicSpotifyOnly
+        }
+        return mode
+    }
+
+    private static func saveMediaSourceMode(_ mode: MediaSourceMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: SettingsKey.mediaSourceMode)
     }
 
     /// Reads a persisted feature flag, defaulting to `defaultValue` when never set.
@@ -227,6 +368,12 @@ final class IslandState: ObservableObject {
     /// `AgentStatusService`, so any session present here drives the live indicator.
     @Published var agentSessions: [AgentSession] = []
 
+    @Published var nextCalendarEvent: CalendarEvent?
+    @Published var privacyStatus: PrivacyStatus = PrivacyStatus()
+    @Published var menuBarRevealActive: Bool = false
+    @Published var menuBarRevealItems: [MenuBarRevealItem] = []
+    @Published var mediaRemoteAvailable: Bool = false
+
     /// Bumped each time an agent newly transitions to *waiting*; the island observes it to play a
     /// brief amber attention flash. The id changes so back-to-back events each retrigger.
     @Published var agentAttention: UUID?
@@ -239,13 +386,23 @@ final class IslandState: ObservableObject {
     var visibleAgentSessions: [AgentSession] { agentsEnabled ? agentSessions : [] }
 
     /// True while now-playing content should be shown (media feature on + something playing).
-    var nowPlayingActive: Bool { mediaEnabled && nowPlaying.hasContent }
+    var nowPlayingActive: Bool { mediaEnabled && mediaSourceMode != .off && nowPlaying.hasContent }
+
+    var clockWidgetEnabled: Bool { clockEnabled }
+
+    var calendarCountdownActive: Bool {
+        guard calendarEnabled, let event = nextCalendarEvent else { return false }
+        let minutes = CalendarService.minutesUntil(event.start)
+        return minutes >= 0 && minutes <= 30
+    }
+
+    var privacyIndicatorActive: Bool { privacyEnabled && privacyStatus.isActive }
 
     /// True while the battery chip should be shown (battery feature on + a battery present).
     var batteryActive: Bool { batteryEnabled && battery.hasBattery }
 
     /// True when the expanded panel's top row has anything to show.
-    var showsContentRow: Bool { mediaEnabled || batteryEnabled }
+    var showsContentRow: Bool { mediaEnabled || batteryEnabled || calendarEnabled }
 
     /// True while at least one agent is actively working or waiting for input.
     var hasActiveAgents: Bool { !visibleAgentSessions.isEmpty }

@@ -59,6 +59,14 @@ if [ -n "${SPARKLE_PUBLIC_KEY:-}" ]; then
     /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_KEY" "$APP_DIR/Contents/Info.plist"
 fi
 
+# Universal now playing via mediaremote-adapter (optional; build with scripts/setup-mediaremote-adapter.sh).
+ADAPTER_SRC="$ROOT/Resources/MediaRemoteAdapter"
+if [ -d "$ADAPTER_SRC" ]; then
+    echo "==> Bundling MediaRemote adapter…"
+    mkdir -p "$RES_DIR/MediaRemoteAdapter"
+    cp -R "$ADAPTER_SRC/"* "$RES_DIR/MediaRemoteAdapter/" 2>/dev/null || true
+fi
+
 echo "==> Ad-hoc code-signing (stable identity for TCC)…"
 codesign --force --deep --sign - \
     --identifier "$BUNDLE_ID" \

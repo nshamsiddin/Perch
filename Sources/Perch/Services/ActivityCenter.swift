@@ -21,14 +21,21 @@ final class ActivityCenter: ObservableObject {
             state.currentActivity = activity
         }
 
+        scheduleClear(after: visibleDuration)
+    }
+
+    private func scheduleClear(after delay: TimeInterval) {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            if self.state.mode == .expanded {
+                self.scheduleClear(after: self.visibleDuration)
+                return
+            }
             withAnimation(.spring(response: 0.36, dampingFraction: 0.85)) {
                 self.state.currentActivity = nil
             }
         }
         clearWorkItem = work
-        // Don't override the peek while the panel is open; reschedule instead.
-        DispatchQueue.main.asyncAfter(deadline: .now() + visibleDuration, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }

@@ -41,9 +41,24 @@ Built with Swift Package Manager — no Xcode project required.
   - **Stuck detection** — a working session that goes quiet too long shows its elapsed time in
     amber, so a wedged or long-running agent stands out at a glance.
 - **Live activity peeks** — brief notch-flanking peeks for track changes and power events.
-- **Feature toggles** — Media, Battery, and AI Agents each have a menu-bar toggle. Turning a
-  feature off stops its backing service entirely (no timers, AppleScript prompts, or file watching)
-  and collapses it from the island immediately. Settings persist across launches.
+- **Settings & widget picker** — **Perch → Settings…** (menu bar or `⌘,`) opens a unified
+  preferences window. Choose which widgets appear in the collapsed island and expanded panel,
+  drag to reorder, and pick a media source mode.
+- **Calendar peeks** — optional next-event countdown in the collapsed ears and a row in the
+  expanded panel. Peeks fire at 15m / 5m / start (EventKit permission required).
+- **Privacy indicators** — optional amber/green/red ears when the camera, microphone, or screen
+  capture is active, with the frontmost app name on expand.
+- **Universal now playing** — optional system-wide now playing via the bundled
+  [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) helper (any app that
+  publishes to macOS Now Playing). Falls back to Music/Spotify AppleScript when the adapter is
+  absent or probing fails.
+- **Menu bar reveal (Ice Bar MVP)** — on macOS 14+, hide cluttered menu bar icons behind spacer
+  controls and reveal a capture strip below the island when you hover the menu bar (Screen
+  Recording permission required).
+- **Clock widget** — optional date/time in the collapsed notch ears when nothing else is showing.
+- **Feature toggles** — quick toggles remain in the menu bar; full layout control lives in
+  Settings. Turning a feature off stops its backing service entirely and collapses it from the
+  island immediately.
 - **Automatic light / dark** — the expanded panel follows the system appearance and switches
   live. The collapsed pill and peeks stay dark on purpose so they blend with the physical notch.
 - **Full-screen aware** — hides while another app is full-screen (the system overlays the notch).
@@ -131,12 +146,27 @@ cutting the first Sparkle-enabled release.
 
 ## Permissions
 
-- **Automation (Apple Events)** — the first time Perch reads or controls Music/Spotify, macOS
-  prompts to allow automating that app. Approve it in
-  *System Settings → Privacy & Security → Automation*. Until then, media info/controls stay idle.
-- **No Accessibility permission** is required (hover uses a tracking area, not a global monitor).
-- **Notifications** — the first waiting alert asks for Notification permission.
-- See *Energy Mode & permissions* for the one feature that needs an admin prompt.
+| Permission | Used for |
+|------------|----------|
+| **Automation** | Music/Spotify AppleScript media controls |
+| **Calendar** | Next-event peeks and countdown (EventKit) |
+| **Notifications** | Agent waiting alerts |
+| **Screen Recording** | Menu bar reveal strip captures hidden icons |
+| **Administrator** | Energy Mode helper install only |
+
+- Hover over the island uses a local tracking area — **no Accessibility permission** for expand.
+- Menu bar reveal installs a **global mouse monitor** when enabled (macOS 14+).
+- Universal media spawns `/usr/bin/perl` with the bundled adapter while the media widget is on.
+
+### Universal media adapter (optional)
+
+```bash
+chmod +x scripts/setup-mediaremote-adapter.sh
+./scripts/setup-mediaremote-adapter.sh
+./bundle.sh
+```
+
+Then choose **Universal (any app)** under *Settings → Widgets → Media source*.
 
 ### A note on rebuilds and permissions
 
@@ -244,8 +274,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 
 Reading system-wide now-playing info historically used the private `MediaRemote` framework. As of
 macOS 15.4, `mediaremoted` checks caller entitlements and returns nothing for unentitled
-third-party apps, so Perch uses AppleScript for Music/Spotify instead. A future upgrade can add
-arbitrary-app support via the `mediaremote-adapter` (a helper loaded by an entitled platform binary).
+third-party apps. Perch defaults to AppleScript for Music/Spotify; enable **Universal** in Settings
+to use the bundled `mediaremote-adapter` (a Perl-invoked helper loaded by an entitled platform
+binary). See *Universal media adapter* above.
 
 ## Architecture
 
@@ -255,6 +286,10 @@ Sources/Perch/
   AppDelegate.swift                wires services, window, menu-bar item, full-screen observer
   AppServices.swift                hub: state + services + user actions
   State/IslandState.swift          single source of truth (ObservableObject) + persisted toggles
+  State/IslandWidget.swift         widget kinds for the picker
+  State/WidgetPreferences.swift    persisted collapsed/expanded widget order
+  UI/PresentationRegistry.swift  shared collapsed presentation precedence (SwiftUI + AppKit)
+  UI/Settings/                     Settings window + widget picker
   Window/
     NotchGeometry.swift            resolves the built-in notched display + notch dimensions
     IslandLayout.swift             pure geometry: window/collapsed/expanded/hover rects
@@ -269,7 +304,11 @@ Sources/Perch/
     ExpandedView.swift             now-playing + battery + AI agents
     IslandTheme.swift              shared colors / metrics / appearance helpers
   Services/
-    MediaService.swift             AppleScript + distributed-notification observers
+    MediaService.swift             AppleScript + optional MediaRemote adapter stream
+    MediaRemoteAdapterClient.swift Perl subprocess bridge to mediaremote-adapter
+    CalendarService.swift          EventKit next-event + peeks
+    PrivacyIndicatorService.swift  camera / mic / screen-capture sampling
+    MenuBarRevealService.swift     Ice Bar MVP spacers + menu bar hover reveal
     BatteryService.swift           IOKit power sources (event-driven)
     VolumeService.swift            CoreAudio volume/mute listeners + transient HUD
     PowerModeService.swift         Energy Mode read + privileged helper install/uninstall
@@ -283,6 +322,8 @@ Tests/PerchTests/                  unit tests for the pure validation / parsing 
 Resources/Info.plist               LSUIElement + stable CFBundleIdentifier + usage strings
 appcast.xml                        Sparkle feed (updated by the release workflow)
 scripts/generate-appcast.sh        signs the release DMG and writes appcast.xml
+scripts/setup-mediaremote-adapter.sh  fetch + build universal media helper
+Resources/MediaRemoteAdapter/      mediaremote-adapter.pl + framework (after setup script)
 Integrations/agent-hooks/          Claude Code + Cursor hook scripts + install.sh / uninstall.sh
 scripts/uninstall-powermode.sh     standalone removal of the Energy Mode root helper
 bundle.sh                          build + assemble + ad-hoc codesign

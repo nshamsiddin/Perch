@@ -56,4 +56,12 @@ final class IslandLayoutTests: XCTestCase {
         XCTAssertEqual(interactive.maxY, visible.maxY - layout.windowMarginBottom, accuracy: 0.0001)
         XCTAssertEqual(interactive.minY, visible.minY, accuracy: 0.0001)
     }
+
+    func testExpandedHoverHotZoneIsNarrowerThanVisibleRect() {
+        let layout = IslandLayout(geometry: geometry)
+        let visible = layout.expandedVisibleRect(sessionCount: 0)
+        let hover = layout.expandedHoverHotZone(sessionCount: 0)
+        XCTAssertGreaterThan(hover.minX, visible.minX)
+        XCTAssertLessThan(hover.maxX, visible.maxX)
+    }
 }

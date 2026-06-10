@@ -7,18 +7,25 @@ struct IslandRootView: View {
     let services: AppServices
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Opacity of the transient amber attention border, pulsed when an agent starts waiting.
     @State private var flashOpacity: Double = 0
 
     private var layout: IslandLayout {
         IslandLayout(geometry: state.geometry,
                      mediaEnabled: state.mediaEnabled,
-                     batteryEnabled: state.batteryEnabled)
+                     batteryEnabled: state.batteryEnabled,
+                     calendarEnabled: state.calendarEnabled,
+                     menuBarRevealActive: state.menuBarRevealActive)
     }
     private var theme: IslandTheme { IslandTheme(scheme: colorScheme) }
 
-    /// Island fill: collapsed/peek stay dark to blend with the physical notch; only the
-    /// expanded panel follows the system Light/Dark appearance.
+    private var registry: PresentationRegistry {
+        PresentationRegistry(state: state, layout: layout)
+    }
+
+    private var presentation: IslandCollapsedPresentation {
+        registry.presentation
+    }
+
     private var islandFill: Color {
         presentation == .expanded ? theme.panelBackground : .black
     }
@@ -27,39 +34,26 @@ struct IslandRootView: View {
         presentation == .expanded ? theme.panelStroke : Color.white.opacity(0.06)
     }
 
-    /// Effective visual presentation derived from mode + transient activity + agents + now-playing.
-    /// Precedence while collapsed: volume HUD > activity peek > agent live > now-playing compact > bare pill.
-    private enum Presentation { case collapsed, nowPlayingCompact, agentLive, peek, volumeHUD, expanded }
-
-    private var presentation: Presentation {
-        // Hover-expanded panel wins; the volume HUD only applies to the collapsed/peek family.
-        if state.mode == .expanded { return .expanded }
-        if state.volumeHUD != nil { return .volumeHUD }
-        if state.currentActivity != nil { return .peek }
-        // A live agent indicator headlines the collapsed island over now-playing; both still
-        // appear together in the expanded panel.
-        if state.hasActiveAgents { return .agentLive }
-        if state.nowPlayingActive { return .nowPlayingCompact }
-        return .collapsed
-    }
-
     private var islandSize: CGSize {
+        let notchWidth = state.geometry.notchWidth
+        let notchHeight = state.geometry.notchHeight
         switch presentation {
         case .collapsed:
-            return CGSize(width: state.geometry.notchWidth, height: state.geometry.notchHeight)
-        case .nowPlayingCompact, .agentLive:
-            // Must match controller's compact hit/hover width (notchWidth + 2*earWidth).
-            return CGSize(width: layout.compactWidth, height: state.geometry.notchHeight)
+            return CGSize(width: notchWidth, height: notchHeight)
+        case .clock:
+            return CGSize(width: registry.collapsedWidth(notchWidth: notchWidth), height: notchHeight)
+        case .nowPlayingCompact, .agentLive, .calendarCountdown, .privacyIndicator:
+            return CGSize(width: layout.compactWidth, height: notchHeight)
         case .peek:
-            return CGSize(width: state.geometry.notchWidth + 220, height: state.geometry.notchHeight + 6)
+            return CGSize(width: notchWidth + 220, height: notchHeight + 6)
         case .volumeHUD:
-            // Must match controller's volume-HUD hit/hover width (notchWidth + 200).
-            return CGSize(width: state.geometry.notchWidth + 200, height: state.geometry.notchHeight + 6)
+            return CGSize(width: notchWidth + 200, height: notchHeight + 6)
         case .expanded:
-            let visibleHeight = layout.expandedVisibleHeight(sessionCount: state.visibleAgentSessions.count,
-                                                             approvalCount: state.agentApprovalCount)
-            // Inset the panel from the window edges, leaving room for the shadow. The panel keeps
-            // its own internal bottom padding (layout.panelBottomPadding) for content breathing room.
+            let visibleHeight = layout.expandedVisibleHeight(
+                sessionCount: state.visibleAgentSessions.count,
+                approvalCount: state.agentApprovalCount,
+                menuBarRevealActive: state.menuBarRevealActive
+            )
             return CGSize(
                 width: layout.expandedWidth - 2 * layout.windowMarginX,
                 height: visibleHeight - layout.windowMarginBottom
@@ -69,7 +63,7 @@ struct IslandRootView: View {
 
     private var cornerRadii: RectangleCornerRadii {
         switch presentation {
-        case .collapsed, .nowPlayingCompact, .agentLive:
+        case .collapsed, .nowPlayingCompact, .agentLive, .calendarCountdown, .privacyIndicator, .clock:
             return RectangleCornerRadii(topLeading: 0, bottomLeading: 12, bottomTrailing: 12, topTrailing: 0)
         case .peek, .volumeHUD:
             return RectangleCornerRadii(topLeading: 0, bottomLeading: 18, bottomTrailing: 18, topTrailing: 0)
@@ -101,16 +95,12 @@ struct IslandRootView: View {
                 .padding(.horizontal, presentation == .expanded ? 16 : 0)
         }
         .frame(width: islandSize.width, height: islandSize.height)
-        // Amber attention border, faded out after each "agent now waiting" event.
         .overlay(
             UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
                 .strokeBorder(Color.orange, lineWidth: 2)
                 .opacity(flashOpacity)
         )
         .shadow(color: .orange.opacity(flashOpacity * 0.6), radius: 10)
-        // Layered, downward-biased drop shadow: a tight contact shadow plus a soft ambient
-        // lift. Both are offset down (positive y) so the panel hangs cleanly from the notch
-        // instead of radiating an even halo around its top edge.
         .shadow(color: .black.opacity(presentation == .expanded ? theme.shadowOpacity : 0),
                 radius: 4, y: 2)
         .shadow(color: .black.opacity(presentation == .expanded ? theme.shadowOpacity * 0.7 : 0),
@@ -127,6 +117,8 @@ struct IslandRootView: View {
         switch presentation {
         case .collapsed:
             Color.clear
+        case .clock:
+            ClockCompactView(notchWidth: state.geometry.notchWidth, earWidth: layout.earWidth)
         case .nowPlayingCompact:
             NowPlayingCompactView(
                 nowPlaying: state.nowPlaying,
@@ -135,27 +127,37 @@ struct IslandRootView: View {
                 earWidth: layout.earWidth,
                 onTap: { services.media.openCurrentSource() }
             )
-            .transition(.opacity)
         case .agentLive:
             AgentLiveView(
                 sessions: state.visibleAgentSessions,
                 notchWidth: state.geometry.notchWidth,
                 earWidth: layout.earWidth
             )
-            .transition(.opacity)
+        case .calendarCountdown:
+            if let event = state.nextCalendarEvent {
+                CalendarCountdownView(
+                    event: event,
+                    notchWidth: state.geometry.notchWidth,
+                    earWidth: layout.earWidth,
+                    onTap: { services.calendar.openEvent(event) }
+                )
+            }
+        case .privacyIndicator:
+            PrivacyIndicatorCompactView(
+                status: state.privacyStatus,
+                notchWidth: state.geometry.notchWidth,
+                earWidth: layout.earWidth
+            )
         case .peek:
             if let activity = state.currentActivity {
                 ActivityPeekView(activity: activity, notchWidth: state.geometry.notchWidth)
-                    .transition(.opacity)
             }
         case .volumeHUD:
             if let hud = state.volumeHUD {
                 VolumeHUDView(hud: hud, notchWidth: state.geometry.notchWidth)
-                    .transition(.opacity)
             }
         case .expanded:
             ExpandedView(state: state, services: services)
-                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
         }
     }
 }

@@ -15,9 +15,27 @@ final class AgentNotificationService: NSObject, UNUserNotificationCenterDelegate
     private var authorized = false
     private var requestedAuth = false
 
+    var isAuthorized: Bool { authorized }
+
     /// Wire up as the delegate. Safe even if notifications are never used.
     func start() {
         center.delegate = self
+        center.getNotificationSettings { [weak self] settings in
+            guard let self else { return }
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                self.authorized = true
+            default:
+                self.authorized = false
+            }
+        }
+    }
+
+    func requestAuthorization() {
+        requestedAuth = true
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
+            self?.authorized = granted
+        }
     }
 
     /// Posts a "waiting" alert for the session. Requests authorization on first use.

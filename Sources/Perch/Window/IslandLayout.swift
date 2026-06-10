@@ -10,12 +10,14 @@ struct IslandLayout {
     // battery-only strip, or no content row at all.
     var mediaEnabled: Bool = true
     var batteryEnabled: Bool = true
+    var calendarEnabled: Bool = false
+    var menuBarRevealActive: Bool = false
 
-    /// Whether the expanded panel reserves its top now-playing/battery row at all.
-    var showsContentRow: Bool { mediaEnabled || batteryEnabled }
+    /// Whether the expanded panel reserves its top now-playing/battery/calendar row at all.
+    var showsContentRow: Bool { mediaEnabled || batteryEnabled || calendarEnabled }
 
     /// True when no feature contributes top content — the panel shows a minimal idle line.
-    var isIdle: Bool { !mediaEnabled && !batteryEnabled }
+    var isIdle: Bool { !showsContentRow }
 
     // Expanded panel dimensions. Height reserves the notch strip up top, then leaves room for
     // a content row below it, so nothing sits behind the camera housing.
@@ -27,11 +29,16 @@ struct IslandLayout {
     /// Height of the idle line shown when every feature is off and no agents are active.
     var idleRowHeight: CGFloat { 52 }
 
+    var calendarRowHeight: CGFloat { 44 }
+    var menuBarRevealStripHeight: CGFloat { 44 }
+
     /// Top content-row height: full when media is on, a slim strip for battery-only, else none.
     var contentRowHeight: CGFloat {
-        if mediaEnabled { return 66 }
-        if batteryEnabled { return batteryOnlyRowHeight }
-        return 0
+        var height: CGFloat = 0
+        if mediaEnabled { height = max(height, 66) }
+        if batteryEnabled && !mediaEnabled { height = max(height, batteryOnlyRowHeight) }
+        if calendarEnabled { height += calendarRowHeight }
+        return height
     }
 
     // The panel floats inside a slightly larger window; these margins keep room around it for the
@@ -100,15 +107,18 @@ struct IslandLayout {
     /// worst-cased to every visible row being a taller approval row, so the panel can grow to show
     /// approvals without ever resizing the window.
     var expandedHeight: CGFloat {
-        baseExpandedHeight + agentsSectionHeight(sessionCount: agentsRowsMax + 1,
-                                                 approvalCount: agentsRowsMax + 1)
+        baseExpandedHeight
+            + menuBarRevealStripHeight
+            + agentsSectionHeight(sessionCount: agentsRowsMax + 1,
+                                  approvalCount: agentsRowsMax + 1)
     }
 
     /// Visible expanded-panel height for the current number of active agents. When every feature
     /// is off and no agents are active, the panel shows a minimal idle line, so reserve its height.
-    func expandedVisibleHeight(sessionCount: Int, approvalCount: Int = 0) -> CGFloat {
+    func expandedVisibleHeight(sessionCount: Int, approvalCount: Int = 0, menuBarRevealActive: Bool = false) -> CGFloat {
         var height = baseExpandedHeight + agentsSectionHeight(sessionCount: sessionCount,
                                                               approvalCount: approvalCount)
+        if menuBarRevealActive { height += menuBarRevealStripHeight }
         if isIdle && sessionCount == 0 { height += idleRowHeight }
         return height
     }
@@ -161,8 +171,9 @@ struct IslandLayout {
 
     /// Visible expanded-panel rect for the current agent count, top-aligned in the window. Used
     /// as the stable hover-tracking region while expanded.
-    func expandedVisibleRect(sessionCount: Int, approvalCount: Int = 0) -> CGRect {
-        let h = expandedVisibleHeight(sessionCount: sessionCount, approvalCount: approvalCount)
+    func expandedVisibleRect(sessionCount: Int, approvalCount: Int = 0, menuBarRevealActive: Bool = false) -> CGRect {
+        let h = expandedVisibleHeight(sessionCount: sessionCount, approvalCount: approvalCount,
+                                      menuBarRevealActive: menuBarRevealActive)
         return CGRect(
             x: 0,
             y: windowSize.height - h,
@@ -173,14 +184,23 @@ struct IslandLayout {
 
     /// Clickable expanded panel — inset from `expandedVisibleRect` by the window margins so
     /// transparent side/bottom strips (shadow room) pass clicks to apps behind the overlay.
-    func expandedInteractiveRect(sessionCount: Int, approvalCount: Int = 0) -> CGRect {
-        let h = expandedVisibleHeight(sessionCount: sessionCount, approvalCount: approvalCount)
+    func expandedInteractiveRect(sessionCount: Int, approvalCount: Int = 0, menuBarRevealActive: Bool = false) -> CGRect {
+        let h = expandedVisibleHeight(sessionCount: sessionCount, approvalCount: approvalCount,
+                                      menuBarRevealActive: menuBarRevealActive)
         return CGRect(
             x: windowMarginX,
             y: windowSize.height - h,
             width: expandedWidth - 2 * windowMarginX,
             height: h - windowMarginBottom
         )
+    }
+
+    /// Hover/claim zone while expanded: slightly larger than the interactive panel so the cursor
+    /// can drift without collapsing, but still excludes the full reserved window frame.
+    func expandedHoverHotZone(sessionCount: Int, approvalCount: Int = 0, menuBarRevealActive: Bool = false) -> CGRect {
+        expandedInteractiveRect(sessionCount: sessionCount, approvalCount: approvalCount,
+                                menuBarRevealActive: menuBarRevealActive)
+            .insetBy(dx: -8, dy: -4)
     }
 
     /// Hot-zone used for hover detection while collapsed: slightly wider/taller than the

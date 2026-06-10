@@ -178,3 +178,94 @@ struct EqualizerView: View {
         return .easeInOut(duration: 0.42 + Double(index) * 0.08).repeatForever(autoreverses: true)
     }
 }
+
+/// Live clock flanking the notch when the clock widget is enabled and nothing else is showing.
+struct ClockCompactView: View {
+    let notchWidth: CGFloat
+    let earWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                Text(context.date.formatted(.dateTime.weekday(.abbreviated).day()))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .frame(width: earWidth, alignment: .trailing)
+            }
+            Spacer().frame(width: notchWidth)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(context.date.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .frame(width: earWidth, alignment: .leading)
+            }
+        }
+    }
+}
+
+/// Countdown to the next calendar event within 30 minutes.
+struct CalendarCountdownView: View {
+    let event: CalendarEvent
+    let notchWidth: CGFloat
+    let earWidth: CGFloat
+    var onTap: () -> Void = {}
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 0) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: earWidth)
+                Spacer().frame(width: notchWidth)
+                Text(countdownLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .frame(width: earWidth)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var countdownLabel: String {
+        let minutes = CalendarService.minutesUntil(event.start)
+        if minutes == 0 { return "Now" }
+        return "\(minutes)m"
+    }
+}
+
+/// Privacy indicator ears when camera, mic, or screen capture is active.
+struct PrivacyIndicatorCompactView: View {
+    let status: PrivacyStatus
+    let notchWidth: CGFloat
+    let earWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                if status.cameraActive {
+                    indicatorDot(color: .green, symbol: "camera.fill")
+                }
+                if status.micActive {
+                    indicatorDot(color: .orange, symbol: "mic.fill")
+                }
+            }
+            .frame(width: earWidth)
+            Spacer().frame(width: notchWidth)
+            HStack(spacing: 4) {
+                if status.screenCaptureActive {
+                    indicatorDot(color: .red, symbol: "rectangle.inset.filled.and.person.filled")
+                }
+            }
+            .frame(width: earWidth)
+        }
+    }
+
+    private func indicatorDot(color: Color, symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(color)
+    }
+}

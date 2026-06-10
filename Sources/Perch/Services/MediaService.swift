@@ -1,12 +1,11 @@
 import AppKit
 
-/// Surfaces now-playing info and transport controls for Music & Spotify via AppleScript.
-/// Updates are driven by each app's distributed notification (instant, cheap), with a slow
-/// timer as a fallback. MediaRemote is intentionally not used: it returns nil for unentitled
-/// apps on macOS 15.4+. Artwork / arbitrary-app support is a documented v1.5 upgrade.
+/// Surfaces now-playing info and transport controls. Uses mediaremote-adapter when available
+/// (universal), with AppleScript fallback for Music & Spotify.
 final class MediaService {
     private let state: IslandState
     private let activity: ActivityCenter
+    private let adapter = MediaRemoteAdapterClient()
 
     static let musicBundleID = "com.apple.Music"
     static let spotifyBundleID = "com.spotify.client"
@@ -17,8 +16,8 @@ final class MediaService {
     private let queue = DispatchQueue(label: "perch.media.applescript")
     private var fallbackTimer: Timer?
     private var lastTrackKey: String = ""
-    /// Separate key so artwork is fetched only once per track (the 5s refresh fires often).
     private var lastArtworkKey: String = ""
+    private var usingAdapter = false
 
     init(state: IslandState, activity: ActivityCenter) {
         self.state = state
@@ -26,6 +25,19 @@ final class MediaService {
     }
 
     func start() {
+        guard state.mediaEnabled, state.mediaSourceMode != .off else { return }
+        state.mediaRemoteAvailable = adapter.probe()
+
+        if state.mediaSourceMode == .universal, state.mediaRemoteAvailable {
+            usingAdapter = true
+            adapter.onUpdate = { [weak self] snapshot in
+                self?.applyAdapter(snapshot)
+            }
+            adapter.startStreaming()
+            return
+        }
+
+        usingAdapter = false
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(self, selector: #selector(playerChanged),
                         name: NSNotification.Name("com.apple.Music.playerInfo"), object: nil)
@@ -39,6 +51,8 @@ final class MediaService {
     }
 
     func stop() {
+        usingAdapter = false
+        adapter.stop()
         DistributedNotificationCenter.default().removeObserver(self)
         fallbackTimer?.invalidate()
         fallbackTimer = nil
@@ -48,7 +62,18 @@ final class MediaService {
         refresh()
     }
 
-    // MARK: - Query
+    private func applyAdapter(_ snapshot: MediaRemoteAdapterClient.Snapshot) {
+        let source = snapshot.bundleIdentifier.flatMap { Self.bundleDisplayName($0) } ?? "Now Playing"
+        let np = NowPlaying(
+            title: snapshot.title,
+            artist: snapshot.artist,
+            album: snapshot.album,
+            isPlaying: snapshot.isPlaying,
+            source: source,
+            bundleIdentifier: snapshot.bundleIdentifier
+        )
+        apply(np, artworkData: snapshot.artworkData)
+    }
 
     func refresh() {
         queue.async { [weak self] in
@@ -56,7 +81,6 @@ final class MediaService {
             let running = self.runningPlayerBundleIDs()
             var result: NowPlaying = .empty
 
-            // Prefer a source that is actively playing; otherwise fall back to any paused track.
             if running.contains(self.spotifyBundleID), let np = self.querySpotify() {
                 result = np
             }
@@ -70,7 +94,7 @@ final class MediaService {
         }
     }
 
-    private func apply(_ np: NowPlaying) {
+    private func apply(_ np: NowPlaying, artworkData: Data? = nil) {
         let key = "\(np.source)|\(np.title)|\(np.artist)"
         if np.hasContent, np.isPlaying, key != lastTrackKey {
             activity.show(symbol: "music.note", text: "\(np.title) — \(np.artist)")
@@ -78,19 +102,19 @@ final class MediaService {
         if np.hasContent { lastTrackKey = key }
         state.nowPlaying = np
 
-        // Artwork: clear when there's nothing playing; otherwise (re)fetch only on track change.
         if !np.hasContent {
             lastArtworkKey = ""
             state.artwork = nil
         } else if key != lastArtworkKey {
             lastArtworkKey = key
-            fetchArtwork(for: np, key: key)
+            if let artworkData, let image = NSImage(data: artworkData) {
+                state.artwork = image
+            } else {
+                fetchArtwork(for: np, key: key)
+            }
         }
     }
 
-    // MARK: - Artwork
-
-    /// Fetches artwork off the main thread and applies it only if the track hasn't changed since.
     private func fetchArtwork(for np: NowPlaying, key: String) {
         queue.async { [weak self] in
             guard let self else { return }
@@ -101,26 +125,23 @@ final class MediaService {
             default:        image = nil
             }
             DispatchQueue.main.async {
-                // Drop stale results from a track that has since changed.
                 guard self.lastArtworkKey == key else { return }
                 self.state.artwork = image
             }
         }
     }
 
-    /// Music returns the raw image bytes directly via the AppleScript result descriptor.
     private func fetchMusicArtwork() -> NSImage? {
         let source = "tell application \"Music\" to get data of artwork 1 of current track"
         var error: NSDictionary?
         guard let script = NSAppleScript(source: source) else { return nil }
         let descriptor = script.executeAndReturnError(&error)
-        if error != nil { return nil } // no track / no artwork / not authorized yet
+        if error != nil { return nil }
         let data = descriptor.data
         guard !data.isEmpty else { return nil }
         return NSImage(data: data)
     }
 
-    /// Spotify returns an https artwork URL we download ourselves.
     private func fetchSpotifyArtwork() -> NSImage? {
         let script = """
         tell application "Spotify"
@@ -130,7 +151,7 @@ final class MediaService {
         end tell
         """
         guard let urlString = run(script)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              urlString.hasPrefix("https://"),            // HTTPS only — never fetch over http
+              urlString.hasPrefix("https://"),
               let url = URL(string: urlString) else { return nil }
 
         var imageData: Data?
@@ -142,35 +163,36 @@ final class MediaService {
             semaphore.signal()
         }
         task.resume()
-        // We're already on a background queue, so blocking here is safe and keeps fetch ordered.
         _ = semaphore.wait(timeout: .now() + 10)
-
         guard let data = imageData, !data.isEmpty else { return nil }
         return NSImage(data: data)
     }
 
-    // MARK: - Controls
-
-    func playPause() { sendCommand("playpause") }
-    func next() { sendCommand("next track") }
-    func previous() { sendCommand("previous track") }
-
-    /// Launches (or activates) Spotify, then refreshes once it's had a moment to come up — used by
-    /// the "nothing playing" affordance so the user can start a source straight from the island.
-    func launchSpotify() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: spotifyBundleID)
-        else { return }
-        let config = NSWorkspace.OpenConfiguration()
-        config.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] app, _ in
-            app?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self?.refresh() }
-        }
+    func playPause() {
+        if usingAdapter { adapter.sendCommand("playpause"); return }
+        sendCommand("playpause")
     }
 
-    /// Brings the app that owns the current track to the front — tapping the now-playing mini
-    /// player jumps to Spotify or Music. Falls back to launching Spotify when nothing is playing.
+    func next() {
+        if usingAdapter { adapter.sendCommand("next"); return }
+        sendCommand("next track")
+    }
+
+    func previous() {
+        if usingAdapter { adapter.sendCommand("previous"); return }
+        sendCommand("previous track")
+    }
+
+    func launchSpotify() {
+        activate(bundleID: spotifyBundleID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refresh() }
+    }
+
     func openCurrentSource() {
+        if let bundleID = state.nowPlaying.bundleIdentifier {
+            activate(bundleID: bundleID)
+            return
+        }
         switch state.nowPlaying.source {
         case "Spotify": activate(bundleID: spotifyBundleID)
         case "Music":   activate(bundleID: musicBundleID)
@@ -178,7 +200,6 @@ final class MediaService {
         }
     }
 
-    /// Activates (or launches) the app for a bundle id, bringing its window to the front.
     private func activate(bundleID: String) {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
         let config = NSWorkspace.OpenConfiguration()
@@ -208,15 +229,11 @@ final class MediaService {
         }
     }
 
-    // MARK: - AppleScript helpers
-
     private func runningPlayerBundleIDs() -> Set<String> {
         let ids = NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier }
         return Set(ids).intersection([musicBundleID, spotifyBundleID])
     }
 
-    // NOTE: use descriptive variable names. Short names like `st`, `t`, `a`, `al` collide with
-    // AppleScript tokens and make the script fail to compile (returning nil silently).
     private func querySpotify() -> NowPlaying? {
         let script = """
         tell application "Spotify"
@@ -259,12 +276,32 @@ final class MediaService {
             artist: parts[2],
             album: parts[3],
             isPlaying: stateString.contains("playing"),
-            source: source
+            source: source,
+            bundleIdentifier: nil
         )
     }
 
-    /// Runs an AppleScript and returns its string result, or nil on error. Errors are expected
-    /// when the target app isn't authorized yet (Automation prompt) or has no current track.
+    static func parseAdapterJSON(_ line: String) -> NowPlaying? {
+        guard let snapshot = MediaRemoteAdapterClient.parse(line: line) else { return nil }
+        let source = snapshot.bundleIdentifier.flatMap { bundleDisplayName($0) } ?? "Now Playing"
+        return NowPlaying(
+            title: snapshot.title,
+            artist: snapshot.artist,
+            album: snapshot.album,
+            isPlaying: snapshot.isPlaying,
+            source: source,
+            bundleIdentifier: snapshot.bundleIdentifier
+        )
+    }
+
+    private static func bundleDisplayName(_ bundleID: String) -> String? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return bundleID.split(separator: ".").last.map(String.init)
+        }
+        return FileManager.default.displayName(atPath: url.path)
+            .replacingOccurrences(of: ".app", with: "")
+    }
+
     private func run(_ source: String) -> String? {
         var error: NSDictionary?
         guard let script = NSAppleScript(source: source) else { return nil }

@@ -10,7 +10,9 @@ struct ExpandedView: View {
         let theme = IslandTheme(scheme: colorScheme)
         let layout = IslandLayout(geometry: state.geometry,
                                   mediaEnabled: state.mediaEnabled,
-                                  batteryEnabled: state.batteryEnabled)
+                                  batteryEnabled: state.batteryEnabled,
+                                  calendarEnabled: state.calendarEnabled,
+                                  menuBarRevealActive: state.menuBarRevealActive)
         return VStack(spacing: 0) {
             // The reserved notch strip doubles as the agents header: the "Agents" title sits on the
             // left ear (where the date used to be) and the status pills on the right ear (where the
@@ -48,17 +50,30 @@ struct ExpandedView: View {
                         .padding(.horizontal, 4)
                         .padding(.bottom, 4)
                 }
-                HStack(alignment: .center, spacing: 12) {
-                    if state.mediaEnabled {
-                        MediaView(state: state, services: services, theme: theme)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Spacer(minLength: 0)
+                VStack(spacing: 6) {
+                    if state.calendarEnabled, let event = state.nextCalendarEvent {
+                        CalendarExpandedRow(event: event, theme: theme) {
+                            services.calendar.openEvent(event)
+                        }
+                        .frame(height: layout.calendarRowHeight)
                     }
-                    BatteryView(state: state, theme: theme, layout: layout)
+                    HStack(alignment: .center, spacing: 12) {
+                        if state.mediaEnabled {
+                            MediaView(state: state, services: services, theme: theme)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Spacer(minLength: 0)
+                        }
+                        BatteryView(state: state, theme: theme, layout: layout)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: state.mediaEnabled ? 66 : (state.batteryEnabled ? layout.batteryOnlyRowHeight : 0))
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: layout.contentRowHeight)
+            }
+
+            if state.menuBarRevealActive {
+                MenuBarRevealView(items: state.menuBarRevealItems, theme: theme)
+                    .frame(height: layout.menuBarRevealStripHeight)
             }
 
             // Idle state: every feature is off and nothing is active. Rather than an empty sheet,
@@ -80,7 +95,7 @@ struct ExpandedView: View {
             Text("Nothing to show")
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(theme.secondaryText)
-            Text("Turn on a feature from the menu bar")
+            Text("Turn on a feature in Settings")
                 .font(.system(size: 10.5))
                 .foregroundStyle(theme.tertiaryText)
         }
@@ -384,5 +399,70 @@ private struct BatteryView: View {
     private var tint: Color {
         if state.battery.isCharging { return .green }
         return state.battery.percentage < 15 ? .red : theme.neutralTint
+    }
+}
+
+// MARK: - Calendar row
+
+struct CalendarExpandedRow: View {
+    let event: CalendarEvent
+    let theme: IslandTheme
+    var onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.primaryText)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var subtitle: String {
+        let minutes = CalendarService.minutesUntil(event.start)
+        if minutes == 0 { return "Starting now" }
+        if minutes < 60 { return "In \(minutes) min" }
+        return event.start.formatted(date: .omitted, time: .shortened)
+    }
+}
+
+// MARK: - Menu bar reveal strip
+
+struct MenuBarRevealView: View {
+    let items: [MenuBarRevealItem]
+    let theme: IslandTheme
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(items) { item in
+                    if let data = item.imageData, let image = NSImage(data: data) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 22)
+                            .help(item.title)
+                    } else {
+                        Text(item.title)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(theme.secondaryText)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+        }
     }
 }

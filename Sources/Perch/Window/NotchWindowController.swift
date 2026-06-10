@@ -35,7 +35,9 @@ final class NotchWindowController {
     private func makeLayout() -> IslandLayout {
         IslandLayout(geometry: state.geometry,
                      mediaEnabled: state.mediaEnabled,
-                     batteryEnabled: state.batteryEnabled)
+                     batteryEnabled: state.batteryEnabled,
+                     calendarEnabled: state.calendarEnabled,
+                     menuBarRevealActive: state.menuBarRevealActive)
     }
 
     // MARK: - Setup
@@ -69,13 +71,17 @@ final class NotchWindowController {
     /// Toggling media/battery can collapse or restore the panel's content row, which changes the
     /// reserved window height — so re-apply the layout (and window frame) when those flags change.
     private func observeFeatureToggles() {
-        state.$mediaEnabled.combineLatest(state.$batteryEnabled)
-            .map { [$0, $1] }
+        state.$mediaEnabled.combineLatest(state.$batteryEnabled, state.$calendarEnabled, state.$menuBarRevealActive)
+            .map { [$0, $1, $2, $3] }
             .removeDuplicates()
             .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.applyLayout() }
             .store(in: &cancellables)
+    }
+
+    private var registry: PresentationRegistry {
+        PresentationRegistry(state: state, layout: layout)
     }
 
     // MARK: - Geometry
@@ -100,20 +106,24 @@ final class NotchWindowController {
         switch state.mode {
         case .collapsed: return layout.collapsedRect(width: currentCollapsedWidth())
         case .expanded:  return layout.expandedInteractiveRect(sessionCount: state.visibleAgentSessions.count,
-                                                             approvalCount: state.agentApprovalCount)
+                                                             approvalCount: state.agentApprovalCount,
+                                                             menuBarRevealActive: state.menuBarRevealActive)
         }
     }
 
     /// Region where the overlay participates in mouse routing (clicks + hover). Wider than
     /// `currentInteractiveRect` while collapsed so hover-to-expand still works.
     func shouldClaimMouseEvents(at point: CGPoint) -> Bool {
-        if currentInteractiveRect().contains(point) { return true }
         switch state.mode {
         case .collapsed:
+            if currentInteractiveRect().contains(point) { return true }
             return layout.hoverHotZone(width: currentCollapsedWidth()).contains(point)
         case .expanded:
-            return layout.expandedVisibleRect(sessionCount: state.visibleAgentSessions.count,
-                                              approvalCount: state.agentApprovalCount).contains(point)
+            // Only the drawn panel (+ a slim hover band), not the full reserved window rect.
+            return layout.expandedHoverHotZone(sessionCount: state.visibleAgentSessions.count,
+                                               approvalCount: state.agentApprovalCount,
+                                               menuBarRevealActive: state.menuBarRevealActive)
+                .contains(point)
         }
     }
 
@@ -121,12 +131,7 @@ final class NotchWindowController {
     /// (volume HUD > peek > agent live > now-playing compact > bare pill) so hit/hover rects match
     /// the pixels.
     private func currentCollapsedWidth() -> CGFloat {
-        let notchWidth = state.geometry.notchWidth
-        if state.volumeHUD != nil { return notchWidth + 200 }             // volume HUD
-        if state.currentActivity != nil { return notchWidth + 220 }       // peek
-        if state.hasActiveAgents { return layout.compactWidth }           // agent ears
-        if state.nowPlayingActive { return layout.compactWidth }          // now-playing ears
-        return notchWidth                                                  // bare pill
+        registry.collapsedWidth(notchWidth: state.geometry.notchWidth)
     }
 
     /// Stable tracking region covering the whole top area.
@@ -142,8 +147,10 @@ final class NotchWindowController {
                 expand()
             }
         } else {
-            // Staying anywhere within the panel keeps it open.
-            if layout.expandedRect.contains(point) {
+            if layout.expandedHoverHotZone(sessionCount: state.visibleAgentSessions.count,
+                                           approvalCount: state.agentApprovalCount,
+                                           menuBarRevealActive: state.menuBarRevealActive)
+                .contains(point) {
                 cancelScheduledCollapse()
             }
         }
