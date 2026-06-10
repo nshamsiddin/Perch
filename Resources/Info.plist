@@ -24,5 +24,13 @@
     <string>Copyright (c) 2026 Shamsiddin Nabiev. MIT License.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Perch uses Apple Events to read now-playing info and control playback in Music and Spotify, and to bring an agent's terminal window to the front when you click its row.</string>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/nshamsiddin/Perch/master/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
+    <key>SUPublicEDKey</key>
+    <string></string>
 </dict>
 </plist>

@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notifyToggleItem: NSMenuItem!
     private var controlToggleItem: NSMenuItem!
     private var removeHelperItem: NSMenuItem!
+    private let updateService = UpdateService()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         services = AppServices(state: state)
@@ -98,6 +99,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(energyItem)
 
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Check for Updates…",
+                                action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit Perch",
                                 action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items where item.action != nil {
@@ -164,6 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The agent sub-options only apply while AI Agents is on.
         notifyToggleItem?.isEnabled = state.agentsEnabled
         controlToggleItem?.isEnabled = state.agentsEnabled
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        updateService.checkForUpdates(sender)
     }
 
     @objc private func quit() {

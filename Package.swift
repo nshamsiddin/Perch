@@ -6,9 +6,16 @@ let package = Package(
     platforms: [
         .macOS(.v13)
     ],
+    products: [
+        .executable(name: "Perch", targets: ["Perch"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
+    ],
     targets: [
         .executableTarget(
             name: "Perch",
+            dependencies: ["Sparkle"],
             path: "Sources/Perch"
         ),
         .testTarget(
