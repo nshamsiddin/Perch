@@ -388,13 +388,14 @@ private struct BatteryView: View {
     }
 }
 
-/// Horizontal battery gauge: fill width tracks percentage; charging overlays a pulsing bolt.
+/// Horizontal battery gauge: fill width tracks percentage; charging adds shimmer + flashing bolt.
 private struct BatteryGaugeIcon: View {
     let percentage: Int
     let isCharging: Bool
     let theme: IslandTheme
 
-    @State private var boltOpacity: Double = 0.35
+    @State private var chargingPulse = false
+    @State private var shimmerPhase: CGFloat = 0
 
     private static let bodyWidth: CGFloat = 24
     private static let bodyHeight: CGFloat = 12
@@ -405,15 +406,13 @@ private struct BatteryGaugeIcon: View {
         CGFloat(min(100, max(0, percentage))) / 100
     }
 
-    private var fillColor: Color {
-        if isCharging { return Color.green }
-        if percentage < 15 { return .red }
-        return theme.neutralTint.opacity(0.5)
-    }
-
     private var innerFillWidth: CGFloat {
         let track = Self.bodyWidth - 2 * Self.innerPadding
         return max(0, track * fillFraction)
+    }
+
+    private var fillHeight: CGFloat {
+        Self.bodyHeight - 2 * Self.innerPadding
     }
 
     var body: some View {
@@ -423,10 +422,7 @@ private struct BatteryGaugeIcon: View {
                     .strokeBorder(theme.neutralTint.opacity(0.45), lineWidth: 1.1)
 
                 HStack(spacing: 0) {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(fillColor)
-                        .frame(width: innerFillWidth, height: Self.bodyHeight - 2 * Self.innerPadding)
-                        .animation(.easeInOut(duration: 0.35), value: percentage)
+                    batteryFill
                     Spacer(minLength: 0)
                 }
                 .padding(Self.innerPadding)
@@ -435,8 +431,9 @@ private struct BatteryGaugeIcon: View {
                     Image(systemName: "bolt.fill")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.white)
-                        .shadow(color: .green.opacity(0.85), radius: 2)
-                        .opacity(boltOpacity)
+                        .shadow(color: .green.opacity(chargingPulse ? 0.95 : 0.35), radius: chargingPulse ? 3 : 1)
+                        .scaleEffect(chargingPulse ? 1.14 : 0.82)
+                        .opacity(chargingPulse ? 1.0 : 0.38)
                 }
             }
             .frame(width: Self.bodyWidth, height: Self.bodyHeight)
@@ -446,19 +443,69 @@ private struct BatteryGaugeIcon: View {
                 .frame(width: Self.capWidth, height: 5)
         }
         .frame(width: Self.bodyWidth + Self.capWidth + 1.5, height: Self.bodyHeight)
-        .onAppear { syncBoltAnimation() }
-        .onChange(of: isCharging) { _ in syncBoltAnimation() }
+        .onAppear { syncChargingAnimations() }
+        .onChange(of: isCharging) { _ in syncChargingAnimations() }
     }
 
-    private func syncBoltAnimation() {
+    @ViewBuilder
+    private var batteryFill: some View {
+        let shape = RoundedRectangle(cornerRadius: 2, style: .continuous)
         if isCharging {
-            boltOpacity = 0.35
-            withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-                boltOpacity = 1.0
+            shape
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.green.opacity(0.72),
+                            Color.green,
+                            Color(red: 0.2, green: 0.88, blue: 0.35),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: innerFillWidth, height: fillHeight)
+                .overlay {
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [.clear, .white.opacity(0.42), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: 7, height: fillHeight)
+                        .offset(x: shimmerOffset)
+                        .clipShape(shape)
+                }
+                .clipShape(shape)
+                .animation(.spring(response: 0.55, dampingFraction: 0.78), value: percentage)
+        } else {
+            shape
+                .fill(percentage < 15 ? Color.red : theme.neutralTint.opacity(0.5))
+                .frame(width: innerFillWidth, height: fillHeight)
+                .animation(.easeInOut(duration: 0.35), value: percentage)
+        }
+    }
+
+    private var shimmerOffset: CGFloat {
+        let span = max(innerFillWidth, 6)
+        return -6 + shimmerPhase * (span + 12)
+    }
+
+    private func syncChargingAnimations() {
+        if isCharging {
+            chargingPulse = false
+            shimmerPhase = 0
+            withAnimation(.easeInOut(duration: 0.42).repeatForever(autoreverses: true)) {
+                chargingPulse = true
+            }
+            withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+                shimmerPhase = 1
             }
         } else {
             withAnimation(.easeOut(duration: 0.2)) {
-                boltOpacity = 1.0
+                chargingPulse = false
+                shimmerPhase = 0
             }
         }
     }
