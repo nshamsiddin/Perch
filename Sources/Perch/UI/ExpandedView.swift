@@ -181,37 +181,32 @@ private struct MediaView: View {
 
     private var playingRow: some View {
         HStack(spacing: 10) {
-            ZStack {
-                if let artwork = state.artwork {
-                    Image(nsImage: artwork)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(theme.tileFill)
-                    Image(systemName: "music.note")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(theme.primaryText.opacity(0.85))
-                }
-            }
-            .frame(width: 38, height: 38)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            // Tapping the art + title jumps to the app playing it (Spotify / Music). The transport
+            // controls stay separate so their own taps don't trigger the open.
+            Button { services.media.openCurrentSource() } label: {
+                HStack(spacing: 10) {
+                    artworkTile
 
-            // Only the title/artist column flexes, so it absorbs slack and truncates long
-            // titles — keeping the transport controls at a stable x-position.
-            VStack(alignment: .leading, spacing: 2) {
-                Text(state.nowPlaying.title)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(theme.primaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(state.nowPlaying.artist)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    // Only the title/artist column flexes, so it absorbs slack and truncates long
+                    // titles — keeping the transport controls at a stable x-position.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(state.nowPlaying.title)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(theme.primaryText)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(state.nowPlaying.artist)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+            .help(openSourceHelp)
 
             HStack(spacing: 6) {
                 transportButton("backward.fill") { services.media.previous() }
@@ -225,13 +220,53 @@ private struct MediaView: View {
         }
     }
 
+    private var artworkTile: some View {
+        ZStack {
+            if let artwork = state.artwork {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(theme.tileFill)
+                Image(systemName: "music.note")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(theme.primaryText.opacity(0.85))
+            }
+        }
+        .frame(width: 38, height: 38)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var openSourceHelp: String {
+        let source = state.nowPlaying.source
+        return source.isEmpty ? "Open player" : "Open \(source)"
+    }
+
+    /// The installed Spotify app's real icon, read once. Nil when Spotify isn't installed, in which
+    /// case the idle tile falls back to the drawn brand mark.
+    private static let spotifyAppIcon: NSImage? = {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: MediaService.spotifyBundleID)
+        else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }()
+
     private var idleRow: some View {
         HStack(spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(theme.tileFill)
-                // White Spotify mark: the disc is white, the waves cut to the tile color.
-                SpotifyLogoView(size: 26, discColor: .white, waveColor: theme.tileFill)
+                if let icon = Self.spotifyAppIcon {
+                    // The real Spotify app icon, so the affordance unmistakably reads as Spotify.
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 34, height: 34)
+                } else {
+                    // Brand-green Spotify mark when the app isn't installed to read an icon from.
+                    SpotifyLogoView(size: 26)
+                }
             }
             .frame(width: 38, height: 38)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

@@ -8,8 +8,11 @@ final class MediaService {
     private let state: IslandState
     private let activity: ActivityCenter
 
-    private let musicBundleID = "com.apple.Music"
-    private let spotifyBundleID = "com.spotify.client"
+    static let musicBundleID = "com.apple.Music"
+    static let spotifyBundleID = "com.spotify.client"
+
+    private let musicBundleID = MediaService.musicBundleID
+    private let spotifyBundleID = MediaService.spotifyBundleID
 
     private let queue = DispatchQueue(label: "perch.media.applescript")
     private var fallbackTimer: Timer?
@@ -162,6 +165,24 @@ final class MediaService {
         NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] _, _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self?.refresh() }
         }
+    }
+
+    /// Brings the app that owns the current track to the front — tapping the now-playing mini
+    /// player jumps to Spotify or Music. Falls back to launching Spotify when nothing is playing.
+    func openCurrentSource() {
+        switch state.nowPlaying.source {
+        case "Spotify": activate(bundleID: spotifyBundleID)
+        case "Music":   activate(bundleID: musicBundleID)
+        default:        launchSpotify()
+        }
+    }
+
+    /// Activates (or launches) the app for a bundle id, bringing its window to the front.
+    private func activate(bundleID: String) {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
     }
 
     private func sendCommand(_ command: String) {
