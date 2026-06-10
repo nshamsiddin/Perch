@@ -160,8 +160,7 @@ struct IslandLayout {
     }
 
     /// Visible expanded-panel rect for the current agent count, top-aligned in the window. Used
-    /// for click-through hit-testing so the app never claims clicks in the reserved-but-empty
-    /// space below the panel when few/no agents are active.
+    /// as the stable hover-tracking region while expanded.
     func expandedVisibleRect(sessionCount: Int, approvalCount: Int = 0) -> CGRect {
         let h = expandedVisibleHeight(sessionCount: sessionCount, approvalCount: approvalCount)
         return CGRect(
@@ -169,6 +168,18 @@ struct IslandLayout {
             y: windowSize.height - h,
             width: expandedWidth,
             height: h
+        )
+    }
+
+    /// Clickable expanded panel — inset from `expandedVisibleRect` by the window margins so
+    /// transparent side/bottom strips (shadow room) pass clicks to apps behind the overlay.
+    func expandedInteractiveRect(sessionCount: Int, approvalCount: Int = 0) -> CGRect {
+        let h = expandedVisibleHeight(sessionCount: sessionCount, approvalCount: approvalCount)
+        return CGRect(
+            x: windowMarginX,
+            y: windowSize.height - h,
+            width: expandedWidth - 2 * windowMarginX,
+            height: h - windowMarginBottom
         )
     }
 

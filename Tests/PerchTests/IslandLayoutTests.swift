@@ -45,4 +45,15 @@ final class IslandLayoutTests: XCTestCase {
             )
         }
     }
+
+    func testExpandedInteractiveRectInsetsWindowMargins() {
+        let layout = IslandLayout(geometry: geometry)
+        let visible = layout.expandedVisibleRect(sessionCount: 0)
+        let interactive = layout.expandedInteractiveRect(sessionCount: 0)
+
+        XCTAssertEqual(interactive.minX, visible.minX + layout.windowMarginX, accuracy: 0.0001)
+        XCTAssertEqual(interactive.maxX, visible.maxX - layout.windowMarginX, accuracy: 0.0001)
+        XCTAssertEqual(interactive.maxY, visible.maxY - layout.windowMarginBottom, accuracy: 0.0001)
+        XCTAssertEqual(interactive.minY, visible.minY, accuracy: 0.0001)
+    }
 }

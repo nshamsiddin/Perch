@@ -14,6 +14,8 @@ final class NotchWindowController {
     private var layout: IslandLayout
     private var collapseWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
+    private var mouseSyncTimer: Timer?
+    private var lastMouseClaimed = false
 
     private let collapseDelay: TimeInterval = 0.35
 
@@ -25,6 +27,7 @@ final class NotchWindowController {
         observeScreenChanges()
         observeFeatureToggles()
         resolveGeometry()
+        startMouseSyncTimer()
     }
 
     /// Builds the layout from the current geometry and the live feature toggles, which decide
@@ -96,8 +99,21 @@ final class NotchWindowController {
     func currentInteractiveRect() -> CGRect {
         switch state.mode {
         case .collapsed: return layout.collapsedRect(width: currentCollapsedWidth())
-        case .expanded:  return layout.expandedVisibleRect(sessionCount: state.visibleAgentSessions.count,
-                                                           approvalCount: state.agentApprovalCount)
+        case .expanded:  return layout.expandedInteractiveRect(sessionCount: state.visibleAgentSessions.count,
+                                                             approvalCount: state.agentApprovalCount)
+        }
+    }
+
+    /// Region where the overlay participates in mouse routing (clicks + hover). Wider than
+    /// `currentInteractiveRect` while collapsed so hover-to-expand still works.
+    func shouldClaimMouseEvents(at point: CGPoint) -> Bool {
+        if currentInteractiveRect().contains(point) { return true }
+        switch state.mode {
+        case .collapsed:
+            return layout.hoverHotZone(width: currentCollapsedWidth()).contains(point)
+        case .expanded:
+            return layout.expandedVisibleRect(sessionCount: state.visibleAgentSessions.count,
+                                              approvalCount: state.agentApprovalCount).contains(point)
         }
     }
 
@@ -137,6 +153,45 @@ final class NotchWindowController {
         if state.mode == .expanded {
             scheduleCollapse()
         }
+    }
+
+    // MARK: - Mouse pass-through
+
+    /// Polls the global cursor and toggles `ignoresMouseEvents` so transparent dead zones around
+    /// the notch pass clicks/hover to apps below. Hit-testing alone is unreliable at
+    /// `CGShieldingWindowLevel` when the window frame is much larger than the visible island.
+    private func startMouseSyncTimer() {
+        mouseSyncTimer?.invalidate()
+        mouseSyncTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
+            self?.syncMouseEventHandling()
+        }
+        if let mouseSyncTimer {
+            RunLoop.main.add(mouseSyncTimer, forMode: .common)
+        }
+    }
+
+    private func syncMouseEventHandling() {
+        guard let window, let contentView = window.contentView else { return }
+
+        if state.isHiddenForFullScreen {
+            if !window.ignoresMouseEvents { window.ignoresMouseEvents = true }
+            return
+        }
+
+        let screenPoint = NSEvent.mouseLocation
+        let windowPoint = contentView.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        let claim = shouldClaimMouseEvents(at: windowPoint)
+        let ignore = !claim
+        if window.ignoresMouseEvents != ignore {
+            window.ignoresMouseEvents = ignore
+        }
+
+        if claim {
+            handleMouseMoved(at: windowPoint)
+        } else if state.mode == .expanded, lastMouseClaimed {
+            handleHoverExit()
+        }
+        lastMouseClaimed = claim
     }
 
     private func expand() {

@@ -6,6 +6,15 @@ import SwiftUI
 /// lands on the hosting view, not its superview.
 final class IslandHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// NSHostingView fills the oversized overlay window; only the island shape should claim hits.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let container = superview as? IslandContainerView,
+              let controller = container.controller else { return nil }
+        let pointInContainer = container.convert(point, from: self)
+        guard controller.currentInteractiveRect().contains(pointInContainer) else { return nil }
+        return super.hitTest(point)
+    }
 }
 
 /// Hosts the SwiftUI island and implements two AppKit behaviors SwiftUI can't do alone:

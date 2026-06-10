@@ -82,6 +82,7 @@ struct IslandRootView: View {
         VStack(spacing: 0) {
             island
             Spacer(minLength: 0)
+                .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(state.isHiddenForFullScreen ? 0 : 1)
