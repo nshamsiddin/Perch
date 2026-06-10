@@ -20,17 +20,44 @@ jobs:
         run: echo "PERCH_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
       - name: Build the DMG
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
         run: |
-          chmod +x bundle.sh dmg.sh
+          chmod +x bundle.sh dmg.sh scripts/generate-appcast.sh
           ./dmg.sh
 
       - name: Name the artifact after the tag
         run: mv Perch.dmg "Perch-${GITHUB_REF_NAME}.dmg"
 
+      - name: Generate Sparkle appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          ./scripts/generate-appcast.sh "Perch-${GITHUB_REF_NAME}.dmg" "${GITHUB_REF_NAME}" "${PERCH_VERSION}"
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" "Perch-${GITHUB_REF_NAME}.dmg" \
+          gh release create "${GITHUB_REF_NAME}" \
+            "Perch-${GITHUB_REF_NAME}.dmg" \
+            appcast.xml \
             --title "Perch ${GITHUB_REF_NAME}" \
             --generate-notes
+
+      - name: Update appcast on master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+          git checkout master
+          cp "$GITHUB_WORKSPACE/appcast.xml" appcast.xml
+          git add appcast.xml
+          if git diff --staged --quiet; then
+            echo "appcast.xml unchanged"
+          else
+            git commit -m "Update appcast for ${GITHUB_REF_NAME}"
+            git push origin master
+          fi
