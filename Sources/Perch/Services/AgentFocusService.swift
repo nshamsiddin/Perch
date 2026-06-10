@@ -163,14 +163,14 @@ final class AgentFocusService {
 
     // MARK: - Input validation (defense-in-depth before AppleScript interpolation)
 
-    private func validatedTTY(_ value: String?) -> String? {
+    func validatedTTY(_ value: String?) -> String? {
         guard let value, value.hasPrefix("/dev/"),
               value.range(of: "^/dev/[A-Za-z0-9./-]+$", options: .regularExpression) != nil
         else { return nil }
         return value
     }
 
-    private func validatedSessionID(_ value: String?) -> String? {
+    func validatedSessionID(_ value: String?) -> String? {
         guard let value, !value.isEmpty,
               value.range(of: "^[A-Za-z0-9:_-]+$", options: .regularExpression) != nil
         else { return nil }

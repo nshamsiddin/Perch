@@ -56,7 +56,8 @@ struct IslandRootView: View {
             // Must match controller's volume-HUD hit/hover width (notchWidth + 200).
             return CGSize(width: state.geometry.notchWidth + 200, height: state.geometry.notchHeight + 6)
         case .expanded:
-            let visibleHeight = layout.expandedVisibleHeight(sessionCount: state.visibleAgentSessions.count)
+            let visibleHeight = layout.expandedVisibleHeight(sessionCount: state.visibleAgentSessions.count,
+                                                             approvalCount: state.agentApprovalCount)
             // Inset the panel from the window edges, leaving room for the shadow. The panel keeps
             // its own internal bottom padding (layout.panelBottomPadding) for content breathing room.
             return CGSize(

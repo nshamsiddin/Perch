@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Islet</string>
+    <string>Perch</string>
     <key>CFBundleDisplayName</key>
-    <string>Islet</string>
+    <string>Perch</string>
     <key>CFBundleExecutable</key>
-    <string>Islet</string>
+    <string>Perch</string>
     <key>CFBundleIdentifier</key>
-    <string>com.islet.Islet</string>
+    <string>com.perch.Perch</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -21,8 +21,8 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Islet</string>
+    <string>Copyright (c) 2026 Shamsiddin Nabiev. MIT License.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Islet uses Apple Events to read now-playing info and control playback in Music and Spotify, and to bring an agent's terminal window to the front when you click its row.</string>
+    <string>Perch uses Apple Events to read now-playing info and control playback in Music and Spotify, and to bring an agent's terminal window to the front when you click its row.</string>
 </dict>
 </plist>

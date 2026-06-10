@@ -27,8 +27,10 @@ final class AgentStatusService {
 
     private let claudeDir: URL
     private let cursorDir: URL
+    private let claudeCommandsDir: URL
+    private let cursorCommandsDir: URL
 
-    private let queue = DispatchQueue(label: "com.islet.agentstatus")
+    private let queue = DispatchQueue(label: "com.perch.agentstatus")
     private var stream: FSEventStreamRef?
     private var tickTimer: Timer?
 
@@ -40,6 +42,10 @@ final class AgentStatusService {
     private let workingTTL: TimeInterval = 180
     /// A `.waiting` session persists longer: it intentionally idles until the user responds.
     private let waitingTTL: TimeInterval = 1800
+    /// A `.done` session lingers just long enough to register as "finished" in the UI (a green
+    /// check), giving closure, then drops so the panel collapses. Kept short so a just-finished
+    /// agent flashes done rather than vanishing silently.
+    private let doneTTL: TimeInterval = 6
     /// Files older than this are skipped without parsing (the Claude dir holds many stale files).
     private var scanTTL: TimeInterval { max(workingTTL, waitingTTL) }
     private let tickInterval: TimeInterval = 2.0
@@ -52,6 +58,8 @@ final class AgentStatusService {
         let home = FileManager.default.homeDirectoryForCurrentUser
         self.claudeDir = home.appendingPathComponent(".claude/agent-tui-state", isDirectory: true)
         self.cursorDir = home.appendingPathComponent(".cursor/agent-status", isDirectory: true)
+        self.claudeCommandsDir = home.appendingPathComponent(".claude/agent-commands", isDirectory: true)
+        self.cursorCommandsDir = home.appendingPathComponent(".cursor/agent-commands", isDirectory: true)
     }
 
     // MARK: - Lifecycle
@@ -77,7 +85,9 @@ final class AgentStatusService {
     /// Both directories must exist for FSEvents to deliver events reliably; creating them is
     /// harmless (the hooks write here too).
     private func ensureDirectories() {
-        for dir in [claudeDir, cursorDir] {
+        // Status dirs are watched; command dirs are where the island writes decisions the gate
+        // hooks poll — create both so the back-channel works the first time Control is enabled.
+        for dir in [claudeDir, cursorDir, claudeCommandsDir, cursorCommandsDir] {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
     }
@@ -130,8 +140,10 @@ final class AgentStatusService {
         var sessions: [AgentSession] = []
         sessions += scanDirectory(claudeDir, tool: .claudeCode, now: now)
         sessions += scanDirectory(cursorDir, tool: .cursor, now: now)
-        // Stable order: working before waiting, Claude before Cursor, then by id.
+        // Stable order: active (working/waiting) before just-finished, working before waiting,
+        // Claude before Cursor, then by id.
         sessions.sort { lhs, rhs in
+            if lhs.isDone != rhs.isDone { return !lhs.isDone }
             if lhs.isWorking != rhs.isWorking { return lhs.isWorking }
             if lhs.tool != rhs.tool { return lhs.tool == .claudeCode }
             return lhs.id < rhs.id
@@ -164,11 +176,13 @@ final class AgentStatusService {
                   )
             else { continue }
 
-            // Keep only sessions that are currently active under their TTL.
+            // Keep only sessions that are currently active under their TTL. A just-finished session
+            // lingers briefly (doneTTL) so the UI can show a "finished" beat before it drops.
             switch session.state {
             case .working where age <= workingTTL: sessions.append(session)
             case .waiting where age <= waitingTTL: sessions.append(session)
-            default: break // done, or stale -> not active
+            case .done where age <= doneTTL: sessions.append(session)
+            default: break // stale -> not active
             }
         }
         return sessions
@@ -177,7 +191,7 @@ final class AgentStatusService {
     private func parse(data: Data, tool: AgentTool, mtime: Date, fallbackID: String) -> AgentSession? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
 
-        let runState: AgentRunState
+        var runState: AgentRunState
         let cwd: String
         let sessionID: String
 
@@ -200,6 +214,10 @@ final class AgentStatusService {
             sessionID: Self.nonEmpty(obj["term_session"] as? String),
             tty: Self.nonEmpty(obj["tty"] as? String)
         )
+        let pendingApproval = Self.pendingApproval(obj, activity: activity)
+        // An agent blocking on an island decision is, by definition, waiting on the user — surface
+        // it as waiting (and let it persist on the longer waiting TTL) no matter the raw hook event.
+        if pendingApproval != nil { runState = .waiting }
         return AgentSession(
             id: "\(tool.rawValue):\(sessionID)",
             tool: tool,
@@ -208,8 +226,52 @@ final class AgentStatusService {
             state: runState,
             updatedAt: mtime,
             activity: activity,
-            focus: focus.isEmpty ? nil : focus
+            focus: focus.isEmpty ? nil : focus,
+            branch: Self.nonEmpty(obj["git_branch"] as? String),
+            model: Self.nonEmpty(obj["model"] as? String),
+            tokens: Self.tokens(obj),
+            pendingApproval: pendingApproval,
+            pid: Self.pid(obj)
         )
+    }
+
+    /// Builds a pending-approval descriptor when a gate hook is blocking on the island. The hook
+    /// sets `pending` + a `request_id` while it waits; absent either, the session isn't awaiting us.
+    private static func pendingApproval(_ obj: [String: Any], activity: String?) -> ApprovalRequest? {
+        guard (obj["pending"] as? Bool) == true,
+              let requestID = nonEmpty(obj["request_id"] as? String) else { return nil }
+        let toolName = nonEmpty(obj["tool_name"] as? String)
+        let target = nonEmpty(obj["target"] as? String)
+        return ApprovalRequest(
+            requestID: requestID,
+            toolName: toolName,
+            target: target,
+            summary: activity ?? [toolName, target].compactMap { $0 }.joined(separator: " ")
+        )
+    }
+
+    /// Reads the agent's process id if the hook recorded one (used by Stop). Accepts a JSON number
+    /// or a numeric string, and rejects anything non-positive.
+    static func pid(_ obj: [String: Any]) -> Int? {
+        let value: Int?
+        if let n = obj["pid"] as? Int { value = n }
+        else if let n = obj["pid"] as? Double { value = Int(n) }
+        else if let s = obj["pid"] as? String { value = Int(s) }
+        else { value = nil }
+        guard let pid = value, pid > 1 else { return nil }
+        return pid
+    }
+
+    /// Reads the latest-turn token count if the hook recorded one. Accepts a JSON number or numeric
+    /// string; rejects non-positive values.
+    static func tokens(_ obj: [String: Any]) -> Int? {
+        let value: Int?
+        if let n = obj["tokens"] as? Int { value = n }
+        else if let n = obj["tokens"] as? Double { value = Int(n) }
+        else if let s = obj["tokens"] as? String { value = Int(s) }
+        else { value = nil }
+        guard let tokens = value, tokens > 0 else { return nil }
+        return tokens
     }
 
     private static func nonEmpty(_ value: String?) -> String? {
@@ -256,7 +318,7 @@ final class AgentStatusService {
 
     // MARK: - State mapping
 
-    private static func claudeState(for event: String) -> AgentRunState {
+    static func claudeState(for event: String) -> AgentRunState {
         switch event {
         case "Stop":         return .done
         case "Notification": return .waiting
@@ -265,7 +327,7 @@ final class AgentStatusService {
         }
     }
 
-    private static func cursorState(for status: String) -> AgentRunState {
+    static func cursorState(for status: String) -> AgentRunState {
         switch status {
         case "done", "stop": return .done
         default:             return .working

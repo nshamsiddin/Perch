@@ -1,13 +1,13 @@
 #!/bin/bash
-# Build Islet and assemble a runnable .app bundle, then ad-hoc code-sign it.
+# Build Perch and assemble a runnable .app bundle, then ad-hoc code-sign it.
 #
 # Ad-hoc signing with a STABLE bundle identifier matters: macOS keys TCC grants
 # (e.g. Automation access for Music/Spotify) off bundle id + code signature. Signing
 # every build keeps those grants from being silently dropped across rebuilds.
 set -euo pipefail
 
-APP_NAME="Islet"
-BUNDLE_ID="com.islet.Islet"
+APP_NAME="Perch"
+BUNDLE_ID="com.perch.Perch"
 CONFIG="release"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

@@ -2,14 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "Islet",
+    name: "Perch",
     platforms: [
         .macOS(.v13)
     ],
     targets: [
         .executableTarget(
-            name: "Islet",
-            path: "Sources/Islet"
+            name: "Perch",
+            path: "Sources/Perch"
+        ),
+        .testTarget(
+            name: "PerchTests",
+            dependencies: ["Perch"],
+            path: "Tests/PerchTests"
         )
     ]
 )

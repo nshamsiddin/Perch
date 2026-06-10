@@ -96,7 +96,8 @@ final class NotchWindowController {
     func currentInteractiveRect() -> CGRect {
         switch state.mode {
         case .collapsed: return layout.collapsedRect(width: currentCollapsedWidth())
-        case .expanded:  return layout.expandedVisibleRect(sessionCount: state.visibleAgentSessions.count)
+        case .expanded:  return layout.expandedVisibleRect(sessionCount: state.visibleAgentSessions.count,
+                                                           approvalCount: state.agentApprovalCount)
         }
     }
 

@@ -11,7 +11,7 @@ final class MediaService {
     private let musicBundleID = "com.apple.Music"
     private let spotifyBundleID = "com.spotify.client"
 
-    private let queue = DispatchQueue(label: "islet.media.applescript")
+    private let queue = DispatchQueue(label: "perch.media.applescript")
     private var fallbackTimer: Timer?
     private var lastTrackKey: String = ""
     /// Separate key so artwork is fetched only once per track (the 5s refresh fires often).
@@ -152,6 +152,18 @@ final class MediaService {
     func next() { sendCommand("next track") }
     func previous() { sendCommand("previous track") }
 
+    /// Launches (or activates) Spotify, then refreshes once it's had a moment to come up — used by
+    /// the "nothing playing" affordance so the user can start a source straight from the island.
+    func launchSpotify() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: spotifyBundleID)
+        else { return }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self?.refresh() }
+        }
+    }
+
     private func sendCommand(_ command: String) {
         queue.async { [weak self] in
             guard let self else { return }
@@ -194,7 +206,7 @@ final class MediaService {
         end tell
         """
         guard let raw = run(script) else { return nil }
-        return parse(raw, source: "Spotify")
+        return Self.parse(raw, source: "Spotify")
     }
 
     private func queryMusic() -> NowPlaying? {
@@ -211,10 +223,10 @@ final class MediaService {
         end tell
         """
         guard let raw = run(script) else { return nil }
-        return parse(raw, source: "Music")
+        return Self.parse(raw, source: "Music")
     }
 
-    private func parse(_ raw: String, source: String) -> NowPlaying? {
+    static func parse(_ raw: String, source: String) -> NowPlaying? {
         let parts = raw.components(separatedBy: "\n")
         guard parts.count >= 4 else { return nil }
         let stateString = parts[0].lowercased()

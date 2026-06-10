@@ -14,6 +14,7 @@ final class AppServices: ObservableObject {
     let agents: AgentStatusService
     let agentFocus: AgentFocusService
     let agentNotifications: AgentNotificationService
+    let agentCommands: AgentCommandService
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -26,6 +27,7 @@ final class AppServices: ObservableObject {
         self.powerMode = PowerModeService()
         self.agentFocus = AgentFocusService()
         self.agentNotifications = AgentNotificationService()
+        self.agentCommands = AgentCommandService()
         self.agents = AgentStatusService(state: state, activity: activity)
 
         // Tapping a "waiting" notification refocuses that agent (if it's still active).
@@ -48,6 +50,23 @@ final class AppServices: ObservableObject {
         agentFocus.focus(session)
     }
 
+    // MARK: - Agent control actions
+
+    /// Approves the session's pending tool call, optionally with a short steering note.
+    func approveAgent(_ session: AgentSession, note: String? = nil) {
+        agentCommands.approve(session, note: note)
+    }
+
+    /// Denies the session's pending tool call.
+    func denyAgent(_ session: AgentSession) {
+        agentCommands.deny(session)
+    }
+
+    /// Best-effort stop of a running agent (SIGINT + deny-next).
+    func stopAgent(_ session: AgentSession) {
+        agentCommands.stop(session)
+    }
+
     func start() {
         // Volume is always on (it only reacts to system volume changes, no toggle exposed).
         volume.start()
@@ -57,7 +76,15 @@ final class AppServices: ObservableObject {
         if state.mediaEnabled { media.start() }
         agentNotifications.start()
         if state.agentsEnabled { agents.start() }
+        // Publish the initial gating config so the gate hooks know whether to block on the island.
+        syncGatingConfig()
         observeFeatureToggles()
+    }
+
+    /// Tells the gate hooks whether to route tool calls through the island. Gating is on only when
+    /// both the AI feature and Control are enabled, so turning either off restores normal behavior.
+    private func syncGatingConfig() {
+        agentCommands.setGating(enabled: state.agentsControlActive)
     }
 
     func stop() {
@@ -118,7 +145,17 @@ final class AppServices: ObservableObject {
                         self.state.agentSessions = []
                     }
                 }
+                // Disabling AI Agents also disables gating (control depends on monitoring).
+                self.syncGatingConfig()
             }
+            .store(in: &cancellables)
+
+        // Toggling Control just republishes the gating config; the gate hooks pick it up on their
+        // next event. No service to start/stop — the back-channel files are always available.
+        state.$agentsControlEnabled
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in self?.syncGatingConfig() }
             .store(in: &cancellables)
     }
 }

@@ -78,6 +78,16 @@ struct FocusHint: Equatable {
     }
 }
 
+/// A pending tool-permission request a gated agent is blocking on, surfaced when the user has
+/// enabled Control. The island answers it by writing a decision (allow/deny) keyed by `requestID`
+/// back to the agent's command file; `requestID` guards against acting on a stale prompt.
+struct ApprovalRequest: Equatable {
+    let requestID: String   // matches the gate hook's pending request; echoed back in the decision
+    var toolName: String?   // e.g. "Bash", "Write" — the tool about to run
+    var target: String?     // coarse target (file basename / command program token), never full args
+    var summary: String     // short human line for the row, e.g. "Run rm" / "Edit Foo.swift"
+}
+
 /// A single tracked agent session (one Claude Code session or one Cursor conversation).
 /// The service publishes only the *active* sessions; the UI renders them directly.
 struct AgentSession: Identifiable, Equatable {
@@ -89,9 +99,25 @@ struct AgentSession: Identifiable, Equatable {
     var updatedAt: Date
     var activity: String?   // short human phrase: what the agent is doing right now
     var focus: FocusHint?   // hints to refocus the owning terminal tab / editor window
+    /// Git branch the agent's working directory is on, when resolvable (great for telling apart
+    /// several agents running in worktrees of the same repo). Nil when not in a git repo.
+    var branch: String?
+    /// Model the agent is running on (e.g. "Sonnet"), surfaced as a secondary hover detail. Nil
+    /// when the tool doesn't report one.
+    var model: String?
+    /// Best-effort token count for the latest turn, paired with `model` on hover. Nil when unknown.
+    var tokens: Int?
+    /// Set when the agent is blocking on a tool-permission decision (Control mode). Drives the
+    /// inline Approve/Deny buttons; nil for ordinary working/waiting/done sessions.
+    var pendingApproval: ApprovalRequest?
+    /// Best-effort process id of the agent (recorded by the hook), used by Stop to send SIGINT.
+    var pid: Int?
 
     var isWorking: Bool { state == .working }
     var isWaiting: Bool { state == .waiting }
+    var isDone: Bool { state == .done }
+    /// True while this session is blocking on an island approval decision.
+    var isAwaitingApproval: Bool { pendingApproval != nil }
 }
 
 /// A transient live-activity peek.
@@ -133,18 +159,25 @@ final class IslandState: ObservableObject {
     @Published var notifyOnWaiting: Bool = IslandState.loadFlag(SettingsKey.notify) {
         didSet { IslandState.saveFlag(SettingsKey.notify, notifyOnWaiting) }
     }
+    /// Whether the island can *act* on agents (approve/deny permission prompts, stop a run). Unlike
+    /// the other flags this defaults OFF: enabling it makes Claude's gated tool calls block on the
+    /// island, a behavior change the user opts into explicitly.
+    @Published var agentsControlEnabled: Bool = IslandState.loadFlag(SettingsKey.control, default: false) {
+        didSet { IslandState.saveFlag(SettingsKey.control, agentsControlEnabled) }
+    }
 
     private enum SettingsKey {
         static let media = "feature.media.enabled"
         static let battery = "feature.battery.enabled"
         static let agents = "feature.agents.enabled"
         static let notify = "feature.agents.notify"
+        static let control = "feature.agents.control"
     }
 
-    /// Reads a persisted feature flag, defaulting to `true` when never set.
-    private static func loadFlag(_ key: String) -> Bool {
+    /// Reads a persisted feature flag, defaulting to `defaultValue` when never set.
+    private static func loadFlag(_ key: String, default defaultValue: Bool = true) -> Bool {
         let defaults = UserDefaults.standard
-        guard defaults.object(forKey: key) != nil else { return true }
+        guard defaults.object(forKey: key) != nil else { return defaultValue }
         return defaults.bool(forKey: key)
     }
 
@@ -193,6 +226,12 @@ final class IslandState: ObservableObject {
 
     var agentWorkingCount: Int { agentSessions.lazy.filter { $0.isWorking }.count }
     var agentWaitingCount: Int { agentSessions.lazy.filter { $0.isWaiting }.count }
+
+    /// True while the island may act on agents: the AI feature and Control are both on.
+    var agentsControlActive: Bool { agentsEnabled && agentsControlEnabled }
+
+    /// Visible sessions currently blocking on an island approval decision (drives taller rows).
+    var agentApprovalCount: Int { visibleAgentSessions.lazy.filter { $0.isAwaitingApproval }.count }
 
     /// Distinct tools that currently have an active session, in a stable display order.
     var activeAgentTools: [AgentTool] {

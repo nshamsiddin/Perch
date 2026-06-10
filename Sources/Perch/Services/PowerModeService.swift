@@ -24,11 +24,11 @@ final class PowerModeService {
     }
 
     // Fixed, code-controlled paths. None of these ever incorporate user input.
-    private let supportDir = "/Library/Application Support/Islet"
-    private let triggerPath = "/Library/Application Support/Islet/requested_powermode"
-    private let scriptPath = "/Library/Application Support/Islet/apply-powermode.sh"
-    private let daemonPlistPath = "/Library/LaunchDaemons/com.islet.powermode.plist"
-    private let daemonLabel = "com.islet.powermode"
+    private let supportDir = "/Library/Application Support/Perch"
+    private let triggerPath = "/Library/Application Support/Perch/requested_powermode"
+    private let scriptPath = "/Library/Application Support/Perch/apply-powermode.sh"
+    private let daemonPlistPath = "/Library/LaunchDaemons/com.perch.powermode.plist"
+    private let daemonLabel = "com.perch.powermode"
 
     // MARK: - Reading (no privilege required)
 
@@ -96,7 +96,7 @@ final class PowerModeService {
     func installHelper() -> Bool {
         let tmpDir = NSTemporaryDirectory()
         let installerPath = (tmpDir as NSString)
-            .appendingPathComponent("islet-powermode-install-\(UUID().uuidString).sh")
+            .appendingPathComponent("perch-powermode-install-\(UUID().uuidString).sh")
 
         let installerScript = makeInstallerScript()
         do {
@@ -120,6 +120,71 @@ final class PowerModeService {
         return isHelperInstalled()
     }
 
+    // MARK: - Uninstall (privileged, one admin prompt)
+
+    /// Removes the privileged helper (root LaunchDaemon + support dir). Prompts for admin once via
+    /// the same `do shell script ... with administrator privileges` path as the install.
+    /// - Parameter completion: called on the main queue with whether the helper is now gone.
+    func removeHelper(completion: ((Bool) -> Void)? = nil) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let removed = self.uninstallHelper()
+            DispatchQueue.main.async { completion?(removed) }
+        }
+    }
+
+    /// Performs the privileged teardown: writes a small uninstaller script to a temp file and runs it
+    /// with administrator privileges. Returns true once the daemon plist is gone (or was never there).
+    @discardableResult
+    func uninstallHelper() -> Bool {
+        guard isHelperInstalled() else { return true }
+
+        let tmpDir = NSTemporaryDirectory()
+        let uninstallerPath = (tmpDir as NSString)
+            .appendingPathComponent("perch-powermode-uninstall-\(UUID().uuidString).sh")
+
+        do {
+            try makeUninstallerScript().write(toFile: uninstallerPath, atomically: true, encoding: .utf8)
+        } catch {
+            return false
+        }
+        defer { try? FileManager.default.removeItem(atPath: uninstallerPath) }
+
+        // The only interpolation is `uninstallerPath`, a process-generated temp path (no user input).
+        let appleScriptSource =
+            "do shell script \"/bin/bash '\(uninstallerPath)'\" with administrator privileges"
+
+        var errorInfo: NSDictionary?
+        guard let script = NSAppleScript(source: appleScriptSource) else { return false }
+        script.executeAndReturnError(&errorInfo)
+        if errorInfo != nil {
+            // Includes the -128 "User cancelled" case.
+            return false
+        }
+        return !isHelperInstalled()
+    }
+
+    /// Builds the bash uninstaller run once as root: boots out and removes the LaunchDaemon and
+    /// deletes the support dir (apply script + trigger file). Mirrors `scripts/uninstall-powermode.sh`.
+    private func makeUninstallerScript() -> String {
+        return """
+        #!/bin/bash
+        set -e
+
+        PLIST="/Library/LaunchDaemons/com.perch.powermode.plist"
+        SUPPORT_DIR="/Library/Application Support/Perch"
+
+        /bin/launchctl bootout system "$PLIST" 2>/dev/null \
+            || /bin/launchctl unload -w "$PLIST" 2>/dev/null \
+            || true
+
+        /bin/rm -f "$PLIST"
+        /bin/rm -rf "$SUPPORT_DIR"
+
+        exit 0
+        """
+    }
+
     // MARK: - Installer script
 
     /// Builds the bash installer run once as root. It creates the support dir, the validating
@@ -131,10 +196,10 @@ final class PowerModeService {
         #!/bin/bash
         set -e
 
-        SUPPORT_DIR="/Library/Application Support/Islet"
+        SUPPORT_DIR="/Library/Application Support/Perch"
         APPLY_SCRIPT="$SUPPORT_DIR/apply-powermode.sh"
         TRIGGER="$SUPPORT_DIR/requested_powermode"
-        PLIST="/Library/LaunchDaemons/com.islet.powermode.plist"
+        PLIST="/Library/LaunchDaemons/com.perch.powermode.plist"
 
         /bin/mkdir -p "$SUPPORT_DIR"
         /usr/sbin/chown root:wheel "$SUPPORT_DIR"
@@ -143,7 +208,7 @@ final class PowerModeService {
         # Apply script: validates the trigger content to exactly 0/1/2, then runs pmset.
         /bin/cat > "$APPLY_SCRIPT" <<'APPLY_EOF'
         #!/bin/bash
-        mode=$(/usr/bin/head -c1 "/Library/Application Support/Islet/requested_powermode" 2>/dev/null | /usr/bin/tr -dc '012')
+        mode=$(/usr/bin/head -c1 "/Library/Application Support/Perch/requested_powermode" 2>/dev/null | /usr/bin/tr -dc '012')
         case "$mode" in
             0|1|2) /usr/bin/pmset -a powermode "$mode" ;;
             *) exit 0 ;;
@@ -159,15 +224,15 @@ final class PowerModeService {
         <plist version="1.0">
         <dict>
             <key>Label</key>
-            <string>com.islet.powermode</string>
+            <string>com.perch.powermode</string>
             <key>ProgramArguments</key>
             <array>
                 <string>/bin/bash</string>
-                <string>/Library/Application Support/Islet/apply-powermode.sh</string>
+                <string>/Library/Application Support/Perch/apply-powermode.sh</string>
             </array>
             <key>WatchPaths</key>
             <array>
-                <string>/Library/Application Support/Islet/requested_powermode</string>
+                <string>/Library/Application Support/Perch/requested_powermode</string>
             </array>
             <key>RunAtLoad</key>
             <false/>

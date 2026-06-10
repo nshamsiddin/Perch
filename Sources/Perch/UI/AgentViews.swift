@@ -85,6 +85,8 @@ struct AgentLiveView: View {
     }
     private var anyWaiting: Bool { sessions.contains { $0.isWaiting } }
     private var accent: Color { anyWaiting ? .orange : .white }
+    /// Every tracked session has finished its turn — show a settled check rather than a pulse.
+    private var allDone: Bool { !sessions.isEmpty && sessions.allSatisfy(\.isDone) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -105,10 +107,17 @@ struct AgentLiveView: View {
         .padding(.trailing, 7)
     }
 
-    /// Animated thinking pulse + a count badge when more than one session is active.
+    /// Animated thinking pulse + a count badge when more than one session is active; a settled
+    /// green check once every session has finished.
     private var rightEar: some View {
         HStack(spacing: 5) {
-            AgentPulseView(accent: accent, paused: anyWaiting)
+            if allDone {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.green)
+            } else {
+                AgentPulseView(accent: accent, paused: anyWaiting)
+            }
             if sessions.count > 1 {
                 Text("\(sessions.count)")
                     .font(.system(size: 11, weight: .bold))
@@ -170,12 +179,26 @@ struct AgentsSectionView: View {
     let sessions: [AgentSession]
     let theme: IslandTheme
     let layout: IslandLayout
+    /// Whether the inline "Agents" title + status pills header is drawn. Off when that header has
+    /// been hoisted into the notch strip up top, leaving this section to render just the rows.
+    var showsHeader: Bool = true
+    /// Whether the inline control affordances (Approve/Deny/Stop) are shown.
+    var controlEnabled: Bool = false
     /// Invoked when a row is clicked, to refocus that agent's terminal tab / editor window.
     var onFocus: (AgentSession) -> Void = { _ in }
+    /// Approve a pending tool call, with an optional steering note.
+    var onApprove: (AgentSession, String?) -> Void = { _, _ in }
+    /// Deny a pending tool call.
+    var onDeny: (AgentSession) -> Void = { _ in }
+    /// Best-effort stop of a running agent.
+    var onStop: (AgentSession) -> Void = { _ in }
 
-    /// Waiting sessions first (they need attention), preserving the upstream order otherwise.
+    /// Waiting sessions first (they need attention), just-finished sessions last (they're winding
+    /// down), working sessions in between — preserving the upstream order within each group.
     private var ordered: [AgentSession] {
-        sessions.filter(\.isWaiting) + sessions.filter { !$0.isWaiting }
+        sessions.filter(\.isWaiting)
+            + sessions.filter { !$0.isWaiting && !$0.isDone }
+            + sessions.filter(\.isDone)
     }
     private var workingCount: Int { sessions.lazy.filter(\.isWorking).count }
     private var waitingCount: Int { sessions.lazy.filter(\.isWaiting).count }
@@ -186,11 +209,17 @@ struct AgentsSectionView: View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             let now = context.date
             VStack(alignment: .leading, spacing: 0) {
-                summary
-                    .frame(height: layout.agentsHeaderHeight)
+                if showsHeader {
+                    summary
+                        .frame(height: layout.agentsHeaderHeight)
+                }
                 ForEach(ordered.prefix(layout.agentsRowsMax)) { session in
-                    AgentRowView(session: session, now: now, theme: theme, onTap: onFocus)
-                        .frame(height: layout.agentRowHeight)
+                    AgentRowView(session: session, now: now, theme: theme,
+                                 controlEnabled: controlEnabled,
+                                 onTap: onFocus, onApprove: onApprove,
+                                 onDeny: onDeny, onStop: onStop)
+                        .frame(height: session.isAwaitingApproval
+                               ? layout.agentApprovalRowHeight : layout.agentRowHeight)
                 }
                 if sessions.count > layout.agentsRowsMax {
                     Text("+\(sessions.count - layout.agentsRowsMax) more")
@@ -224,23 +253,54 @@ struct AgentsSectionView: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 6) {
-                if waitingCount > 0 { countChip(color: .orange, count: waitingCount, label: "waiting") }
-                if workingCount > 0 { countChip(color: .green, count: workingCount, label: "working") }
-            }
-            .padding(.trailing, 6)
+            AgentStatusPills(waitingCount: waitingCount, workingCount: workingCount)
+                .padding(.trailing, 6)
         }
         .padding(.leading, 6)
     }
+}
 
-    /// A soft tinted capsule pairing a state dot with its count + label — Apple's "status pill"
-    /// idiom, legible at a glance without shouting.
-    private func countChip(color: Color, count: Int, label: String) -> some View {
+/// The working/waiting status pills, shared by the in-panel agents header and the notch-strip
+/// header. Renders nothing when no session is in either state.
+///
+/// Adaptive density: with a single active state there's room for the descriptive label
+/// ("1 waiting"); when both states are present they'd overflow the narrow notch ear, so the chips
+/// collapse to compact color-coded counts — the amber/green coding (and the rows below) keeps them
+/// unambiguous without truncating.
+struct AgentStatusPills: View {
+    let waitingCount: Int
+    let workingCount: Int
+
+    private var compact: Bool { waitingCount > 0 && workingCount > 0 }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if waitingCount > 0 {
+                AgentCountChip(color: .orange, count: waitingCount,
+                               label: compact ? nil : "waiting")
+            }
+            if workingCount > 0 {
+                AgentCountChip(color: .green, count: workingCount,
+                               label: compact ? nil : "working")
+            }
+        }
+    }
+}
+
+/// A soft tinted capsule pairing a state dot with its count — Apple's "status pill" idiom, legible
+/// at a glance without shouting. With a `label` it spells out the state ("1 waiting"); without one
+/// it stays compact (just the dot + count) so several can share a tight row.
+struct AgentCountChip: View {
+    let color: Color
+    let count: Int
+    var label: String? = nil
+
+    var body: some View {
         HStack(spacing: 5) {
             Circle()
                 .fill(color)
                 .frame(width: 6, height: 6)
-            Text("\(count) \(label)")
+            Text(label.map { "\(count) \($0)" } ?? "\(count)")
                 .font(.system(size: 11, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(color)
@@ -257,8 +317,14 @@ struct AgentRowView: View {
     let session: AgentSession
     let now: Date
     let theme: IslandTheme
+    var controlEnabled: Bool = false
     var onTap: (AgentSession) -> Void = { _ in }
+    var onApprove: (AgentSession, String?) -> Void = { _, _ in }
+    var onDeny: (AgentSession) -> Void = { _ in }
+    var onStop: (AgentSession) -> Void = { _ in }
     @State private var hovering = false
+    /// Optional steering note typed alongside an Approve; cleared after the row stops pending.
+    @State private var note: String = ""
 
     /// Seconds since the last hook event. A working session that hasn't pinged in a while is
     /// likely mid-long-tool-call — surfaced as "stuck" so a wedged agent stands out.
@@ -266,52 +332,145 @@ struct AgentRowView: View {
     private var isStuck: Bool { session.isWorking && staleSeconds >= Self.stuckThreshold }
 
     /// Subtitle prefers the live activity ("Editing Foo.swift"); the glyph already names the tool,
-    /// so we fall back to the tool label only when there's no activity to show.
-    private var subtitle: String { session.activity ?? session.tool.label }
+    /// so we fall back to the tool label only when there's no activity to show. A finished session
+    /// reads "Finished" since it has no live activity.
+    private var subtitle: String {
+        if session.isDone { return "Finished" }
+        return session.activity ?? session.tool.label
+    }
+
+    /// Secondary detail revealed on hover: the model and (if known) the latest-turn token count —
+    /// power info kept off the resting glance surface so rows stay calm.
+    private var hoverDetail: String? {
+        guard let model = session.model else { return nil }
+        if let tokens = session.tokens { return "\(model) · \(Self.shortTokens(tokens))" }
+        return model
+    }
+
+    /// Stop is offered on active rows that aren't already asking for an explicit decision.
+    private var showsStop: Bool {
+        controlEnabled && !session.isAwaitingApproval && (session.isWorking || session.isWaiting)
+    }
 
     var body: some View {
-        Button { onTap(session) } label: {
-            HStack(spacing: 8) {
-                // Tint the glyph amber when this session is waiting on the user.
-                AgentToolIcon(tool: session.tool, size: 12,
-                              color: session.isWaiting ? Color.orange : theme.primaryText)
-                    .frame(width: 18)
+        VStack(spacing: 5) {
+            topRow
+            if session.isAwaitingApproval { approvalActions }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(theme.controlFill.opacity(hovering ? 1 : 0))
+        )
+        .onHover { hovering = $0 }
+    }
 
-                VStack(alignment: .leading, spacing: 1) {
-                    // Project leads: it's the identifier you scan for when juggling agents.
-                    Text(session.project)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(theme.primaryText)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text(subtitle)
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.secondaryText)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+    /// Tool glyph + project/activity (a focus button), with the Stop pill and status badge as
+    /// siblings so they don't nest inside the focus button.
+    private var topRow: some View {
+        HStack(spacing: 8) {
+            Button { onTap(session) } label: {
+                HStack(spacing: 8) {
+                    // Tint the glyph amber when this session is waiting on the user.
+                    AgentToolIcon(tool: session.tool, size: 12,
+                                  color: session.isWaiting ? Color.orange : theme.primaryText)
+                        .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        // Project leads: it's the identifier you scan for when juggling agents. The
+                        // branch tag rides alongside so worktrees of one repo are distinguishable.
+                        HStack(spacing: 6) {
+                            Text(session.project)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(theme.primaryText)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .layoutPriority(1)
+                            if let branch = session.branch {
+                                BranchTag(branch: branch, theme: theme)
+                            }
+                        }
+                        Text(hovering ? (hoverDetail ?? subtitle) : subtitle)
+                            .font(.system(size: 10))
+                            .foregroundStyle(theme.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                AgentStatusBadge(state: session.state,
-                                 age: Self.shortAge(of: session.updatedAt, now: now),
-                                 stuck: isStuck,
-                                 theme: theme)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(theme.controlFill.opacity(hovering ? 1 : 0))
-            )
+            .buttonStyle(.plain)
+
+            if showsStop { stopButton }
+
+            AgentStatusBadge(state: session.state,
+                             age: Self.shortAge(of: session.updatedAt, now: now),
+                             stuck: isStuck,
+                             theme: theme)
+        }
+    }
+
+    /// Second line for a pending approval: an optional steering note, then Deny / Approve. Aligned
+    /// under the project name (past the 18pt icon rail + 8pt gap) so it reads as part of the row.
+    private var approvalActions: some View {
+        HStack(spacing: 6) {
+            TextField("Note (optional)", text: $note)
+                .textFieldStyle(.plain)
+                .font(.system(size: 10.5))
+                .foregroundStyle(theme.primaryText)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(theme.controlFill))
+                .frame(maxWidth: .infinity)
+
+            pillButton(title: "Deny", tint: .red) { onDeny(session) }
+            pillButton(title: "Approve", tint: .green) {
+                let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                onApprove(session, trimmed.isEmpty ? nil : trimmed)
+            }
+        }
+        .padding(.leading, 26)
+    }
+
+    private var stopButton: some View {
+        Button { onStop(session) } label: {
+            Text("Stop")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.orange.opacity(0.16)))
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+    }
+
+    private func pillButton(title: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(tint.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
     }
 
     /// Seconds without a hook event before a working session reads as stuck.
     static let stuckThreshold = 60
+
+    /// Compact token count ("820", "12k", "1.2M") for the hover detail.
+    static func shortTokens(_ count: Int) -> String {
+        switch count {
+        case ..<1_000:      return "\(count)"
+        case ..<1_000_000:  return "\(count / 1_000)k"
+        default:            return String(format: "%.1fM", Double(count) / 1_000_000)
+        }
+    }
 
     /// Compact, calendar-free elapsed time ("now", "8s", "3m", "2h", "1d").
     static func shortAge(of date: Date, now: Date) -> String {
@@ -336,19 +495,32 @@ struct AgentStatusBadge: View {
     let theme: IslandTheme
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            if state == .waiting {
-                Text("Waiting")
+        // A finished session reads as a calm, definitive green check with "Done" — closure that
+        // doesn't keep a live timer running as it winds down.
+        if state == .done {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.green)
+                Text("Done")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(color)
+                    .foregroundStyle(.green)
             }
-            Text(age)
-                .font(.system(size: 10, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(ageColor)
+        } else {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+                if state == .waiting {
+                    Text("Waiting")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(color)
+                }
+                Text(age)
+                    .font(.system(size: 10, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(ageColor)
+            }
         }
     }
 
@@ -360,5 +532,28 @@ struct AgentStatusBadge: View {
     private var ageColor: Color {
         if state == .waiting { return color.opacity(0.8) }
         return stuck ? .orange : theme.tertiaryText
+    }
+}
+
+/// A subtle branch tag (a branch glyph + name) riding alongside a row's project, so two agents in
+/// different worktrees of the same repo are immediately distinguishable. Stays quiet (tertiary).
+struct BranchTag: View {
+    let branch: String
+    let theme: IslandTheme
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 8.5, weight: .semibold))
+            Text(branch)
+                .font(.system(size: 9.5, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(theme.tertiaryText)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1.5)
+        .background(Capsule().fill(theme.controlFill.opacity(0.6)))
+        .layoutPriority(0)
     }
 }

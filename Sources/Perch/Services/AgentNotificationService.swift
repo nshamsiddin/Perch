@@ -62,7 +62,7 @@ final class AgentNotificationService: NSObject, UNUserNotificationCenterDelegate
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    /// Show the banner + play sound even when Islet is the active app.
+    /// Show the banner + play sound even when Perch is the active app.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler:

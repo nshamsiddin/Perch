@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Idempotently merge Islet's agent-status writers into the Claude Code and Cursor hook configs.
+Idempotently merge Perch's agent-status writers into the Claude Code and Cursor hook configs.
 
-Only *adds* Islet entries when they are absent; it never removes or rewrites the user's existing
+Only *adds* Perch entries when they are absent; it never removes or rewrites the user's existing
 hooks. A ``.bak`` backup is written before modifying an existing config file. Run via ``install.sh``.
 """
 
@@ -16,12 +16,22 @@ CLAUDE_CMD = "python3 ~/.claude/hooks/claude_agent_state.py"
 CLAUDE_EVENTS = ["UserPromptSubmit", "Notification", "SubagentStop"]
 CLAUDE_MARKER = "claude_agent_state.py"
 
+# Claude Code Control: the PreToolUse gate that lets Perch approve/deny tool calls. Scoped by a
+# matcher to the side-effecting tools so trivial reads/searches never invoke it. The gate only
+# blocks when the user has enabled Control in Perch; otherwise it just records monitoring state.
+CLAUDE_GATE_CMD = "python3 ~/.claude/hooks/claude_agent_gate.py"
+CLAUDE_GATE_MARKER = "claude_agent_gate.py"
+CLAUDE_GATE_EVENT = "PreToolUse"
+CLAUDE_GATE_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch"
+
 # Cursor: lifecycle + activity writers (schema v1). Paths are relative to ~/.cursor (user hooks run
-# there). edit/shell refresh the "working" state and carry a short activity phrase.
+# there). edit refreshes the "working" state and carries a short activity phrase. Shell/MCP execution
+# go through the gate so Perch's Control can approve/deny/stop them (the gate also records state).
 CURSOR_CMDS = {
     "beforeSubmitPrompt": "python3 ./hooks/cursor_agent_state.py working",
     "afterFileEdit": "python3 ./hooks/cursor_agent_state.py edit",
-    "beforeShellExecution": "python3 ./hooks/cursor_agent_state.py shell",
+    "beforeShellExecution": "python3 ./hooks/cursor_agent_gate.py shell",
+    "beforeMCPExecution": "python3 ./hooks/cursor_agent_gate.py mcp",
     "stop": "python3 ./hooks/cursor_agent_state.py done",
 }
 
@@ -68,6 +78,23 @@ def merge_claude() -> bool:
         )
         if not already:
             groups.append({"hooks": [{"type": "command", "command": CLAUDE_CMD}]})
+            changed = True
+
+    # Register the PreToolUse gate (matcher-scoped) for Perch's Control feature.
+    gate_groups = hooks.setdefault(CLAUDE_GATE_EVENT, [])
+    if isinstance(gate_groups, list):
+        gate_present = any(
+            CLAUDE_GATE_MARKER in entry.get("command", "")
+            for group in gate_groups
+            if isinstance(group, dict)
+            for entry in group.get("hooks", [])
+            if isinstance(entry, dict)
+        )
+        if not gate_present:
+            gate_groups.append({
+                "matcher": CLAUDE_GATE_MATCHER,
+                "hooks": [{"type": "command", "command": CLAUDE_GATE_CMD}],
+            })
             changed = True
 
     if changed:

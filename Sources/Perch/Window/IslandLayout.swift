@@ -62,27 +62,40 @@ struct IslandLayout {
     var agentsSectionTopInset: CGFloat { showsContentRow ? 8 : 14 }
     var agentsHeaderHeight: CGFloat { 34 }
     var agentRowHeight: CGFloat { 30 }
+    /// Taller variant for a row blocking on an approval: it adds a second line carrying the
+    /// Approve/Deny buttons and an optional steering-note field.
+    var agentApprovalRowHeight: CGFloat { 64 }
     var agentsMoreLineHeight: CGFloat { 16 }
     var agentsRowsMax: Int { 3 }
 
-    /// Height of the agents block for a given active-session count (0 when none).
-    func agentsSectionHeight(sessionCount: Int) -> CGFloat {
+    /// Height of the agents block for a given active-session count (0 when none). `approvalCount` is
+    /// how many of those rows are blocking on an approval (they float to the top and are taller).
+    /// The "Agents" title + status pills live in the reserved notch strip (see `ExpandedView`), so
+    /// this section reserves only the rows themselves — no in-section header height.
+    func agentsSectionHeight(sessionCount: Int, approvalCount: Int = 0) -> CGFloat {
         guard sessionCount > 0 else { return 0 }
         let rows = min(sessionCount, agentsRowsMax)
+        let approvals = min(max(approvalCount, 0), rows)
+        let normal = rows - approvals
         let more: CGFloat = sessionCount > agentsRowsMax ? agentsMoreLineHeight : 0
-        return agentsSectionTopInset + agentsHeaderHeight + CGFloat(rows) * agentRowHeight + more
+        return agentsSectionTopInset
+            + CGFloat(approvals) * agentApprovalRowHeight
+            + CGFloat(normal) * agentRowHeight + more
     }
 
-    /// The window always reserves room for the *largest* agents section (incl. the "+N more"
-    /// line), so the panel can grow to show agents without ever resizing the window.
+    /// The window always reserves room for the *largest* agents section (incl. the "+N more" line),
+    /// worst-cased to every visible row being a taller approval row, so the panel can grow to show
+    /// approvals without ever resizing the window.
     var expandedHeight: CGFloat {
-        baseExpandedHeight + agentsSectionHeight(sessionCount: agentsRowsMax + 1)
+        baseExpandedHeight + agentsSectionHeight(sessionCount: agentsRowsMax + 1,
+                                                 approvalCount: agentsRowsMax + 1)
     }
 
     /// Visible expanded-panel height for the current number of active agents. When every feature
     /// is off and no agents are active, the panel shows a minimal idle line, so reserve its height.
-    func expandedVisibleHeight(sessionCount: Int) -> CGFloat {
-        var height = baseExpandedHeight + agentsSectionHeight(sessionCount: sessionCount)
+    func expandedVisibleHeight(sessionCount: Int, approvalCount: Int = 0) -> CGFloat {
+        var height = baseExpandedHeight + agentsSectionHeight(sessionCount: sessionCount,
+                                                              approvalCount: approvalCount)
         if isIdle && sessionCount == 0 { height += idleRowHeight }
         return height
     }
@@ -136,8 +149,8 @@ struct IslandLayout {
     /// Visible expanded-panel rect for the current agent count, top-aligned in the window. Used
     /// for click-through hit-testing so the app never claims clicks in the reserved-but-empty
     /// space below the panel when few/no agents are active.
-    func expandedVisibleRect(sessionCount: Int) -> CGRect {
-        let h = expandedVisibleHeight(sessionCount: sessionCount)
+    func expandedVisibleRect(sessionCount: Int, approvalCount: Int = 0) -> CGRect {
+        let h = expandedVisibleHeight(sessionCount: sessionCount, approvalCount: approvalCount)
         return CGRect(
             x: 0,
             y: windowSize.height - h,

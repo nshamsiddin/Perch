@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Cursor agent-state writer (Islet).
+Cursor agent-state writer (Perch).
 
 Invoked by Cursor hooks. The first argv selects the mode:
   ``working`` (beforeSubmitPrompt) / ``done`` (stop) / ``edit`` (afterFileEdit) /
   ``shell`` (beforeShellExecution).
 Reads the hook payload on stdin for the conversation id + workspace, then records
-``~/.cursor/agent-status/<conversation_id>.json`` so Islet can show Cursor's agent activity plus a
+``~/.cursor/agent-status/<conversation_id>.json`` so Perch can show Cursor's agent activity plus a
 short "what it's doing" line.
 
 Fails open: any error still exits 0 and emits an empty JSON object so it never blocks Cursor.
@@ -33,8 +33,44 @@ def _sanitize(value: str, fallback: str = "unknown") -> str:
     return cleaned or fallback
 
 
+_BRANCH_UNSAFE = re.compile(r"[^A-Za-z0-9._/-]")
+_BRANCH_MAX = 40
+
+
 def _clip(text: str) -> str:
     return " ".join(text.split())[:_ACTIVITY_MAX]
+
+
+def _git_branch(cwd: str) -> str:
+    """Best-effort current git branch for ``cwd``.
+
+    Read directly from git metadata (``.git/HEAD``) rather than shelling out, so we never spawn a
+    subprocess on a hook-supplied value (Secure Python rule #6). ``cwd`` is the agent's own local
+    workspace root from the trusted hook payload, not remote input; we still validate it is an
+    existing directory and only read the fixed ``HEAD`` metadata file under it (never write, never
+    execute) before sanitizing the result (rules #1/#2). Returns "" on any miss.
+    """
+    try:
+        if not cwd or not os.path.isdir(cwd):
+            return ""
+        git_path = Path(cwd) / ".git"
+        if git_path.is_file():
+            text = git_path.read_text(encoding="utf-8", errors="ignore").strip()
+            if text.startswith("gitdir:"):
+                git_dir = Path(text.split(":", 1)[1].strip())
+            else:
+                return ""
+        else:
+            git_dir = git_path
+        head = (git_dir / "HEAD").read_text(encoding="utf-8", errors="ignore").strip()
+        if head.startswith("ref:"):
+            ref = head.split(":", 1)[1].strip()
+            name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+        else:
+            name = head[:7]  # detached HEAD -> short sha
+        return _BRANCH_UNSAFE.sub("", name)[:_BRANCH_MAX]
+    except (OSError, ValueError):
+        return ""
 
 
 def _activity(mode: str, payload: dict) -> str:
@@ -55,34 +91,43 @@ def _activity(mode: str, payload: dict) -> str:
     return ""
 
 
-def main() -> None:
-    # The mode comes from our own hook config via argv, not user input, but it is still validated
-    # against an allowlist before use.
-    mode = sys.argv[1] if len(sys.argv) > 1 else "working"
-    if mode not in _ALLOWED_MODES:
-        mode = "working"
-    status = "done" if mode == "done" else "working"
+def normalize_mode(raw: str) -> str:
+    """Validates the argv mode against the allowlist, defaulting to 'working'."""
+    return raw if raw in _ALLOWED_MODES else "working"
 
+
+def read_payload() -> dict:
+    """Reads and normalizes the hook payload from stdin. Always returns a dict."""
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except (ValueError, OSError):
         payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
+    return payload if isinstance(payload, dict) else {}
 
+
+def build_record(mode: str, payload: dict) -> tuple[str, dict]:
+    """Builds the (sanitized conversation id, status record) pair Perch reads. Shared by the plain
+    state writer and the execution gate so both emit an identical monitoring shape."""
+    status = "done" if mode == "done" else "working"
     conversation_id = _sanitize(str(payload.get("conversation_id", "unknown")))
     roots = payload.get("workspace_roots")
     cwd = roots[0] if isinstance(roots, list) and roots and isinstance(roots[0], str) else ""
-
     record = {
         "tool": "cursor",
         "status": status,
         "conversation_id": conversation_id,
         "cwd": cwd,
+        "git_branch": _git_branch(cwd),
         "activity": _activity(mode, payload),
         "ts": time.time(),
     }
+    return conversation_id, record
 
+
+def write_record(conversation_id: str, record: dict) -> None:
+    """Atomically writes a session's status file. Best-effort: never raises. `conversation_id` is
+    the already-sanitized value from `build_record`."""
+    record["ts"] = time.time()
     state_dir = Path.home() / ".cursor" / "agent-status"
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
@@ -96,6 +141,13 @@ def main() -> None:
         except (OSError, NameError):
             pass
 
+
+def main() -> None:
+    # The mode comes from our own hook config via argv, not user input, but it is still validated
+    # against an allowlist before use.
+    mode = normalize_mode(sys.argv[1] if len(sys.argv) > 1 else "working")
+    conversation_id, record = build_record(mode, read_payload())
+    write_record(conversation_id, record)
     # Cursor command hooks may parse stdout as JSON; an empty object is a no-op (allow/continue).
     sys.stdout.write("{}")
 

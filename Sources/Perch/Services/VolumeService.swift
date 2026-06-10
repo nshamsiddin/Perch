@@ -18,7 +18,7 @@ import AudioToolbox
 /// All listener blocks run on a private serial queue; UI mutations hop to the main thread.
 final class VolumeService {
     private let state: IslandState
-    private let queue = DispatchQueue(label: "com.islet.volume")
+    private let queue = DispatchQueue(label: "com.perch.volume")
 
     private var deviceID = AudioObjectID(kAudioObjectUnknown)
     private var defaultDeviceListener: AudioObjectPropertyListenerBlock?
@@ -154,7 +154,7 @@ final class VolumeService {
         DispatchQueue.main.async { [weak self] in
             self?.showHUD(hud)
         }
-        // Best-effort: hide macOS's native volume bezel so only Islet's HUD shows.
+        // Best-effort: hide macOS's native volume bezel so only Perch's HUD shows.
         hideNativeBezel()
     }
 

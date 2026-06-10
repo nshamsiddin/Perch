@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var batteryToggleItem: NSMenuItem!
     private var agentsToggleItem: NSMenuItem!
     private var notifyToggleItem: NSMenuItem!
+    private var controlToggleItem: NSMenuItem!
+    private var removeHelperItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         services = AppServices(state: state)
@@ -35,13 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled",
-                                   accessibilityDescription: "Islet")
+                                   accessibilityDescription: "Perch")
         }
 
         let menu = NSMenu()
         // Refresh the feature checkmarks each time the menu opens so they reflect live state.
         menu.delegate = self
-        let header = NSMenuItem(title: "Islet", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: "Perch", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
@@ -63,6 +65,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifyToggleItem.target = self
         notifyToggleItem.indentationLevel = 1
         menu.addItem(notifyToggleItem)
+        // Sub-option of AI Agents: let the island approve/deny/stop agents (gates Claude tool calls).
+        controlToggleItem = NSMenuItem(title: "Control (approve/deny/stop)",
+                                       action: #selector(toggleControl), keyEquivalent: "")
+        controlToggleItem.target = self
+        controlToggleItem.indentationLevel = 1
+        menu.addItem(controlToggleItem)
         updateFeatureChecks()
         menu.addItem(.separator())
 
@@ -77,12 +85,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             modeItem.tag = mode.rawValue
             submenu.addItem(modeItem)
         }
+        // Teardown for the privileged helper the Energy Mode install creates. Hidden unless the
+        // helper is actually installed (visibility refreshed in `menuNeedsUpdate`).
+        submenu.addItem(.separator())
+        removeHelperItem = NSMenuItem(title: "Remove Perch helper",
+                                      action: #selector(removeEnergyHelper), keyEquivalent: "")
+        removeHelperItem.target = self
+        removeHelperItem.isHidden = true
+        submenu.addItem(removeHelperItem)
         energyItem.submenu = submenu
         energyModeMenu = submenu
         menu.addItem(energyItem)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Islet",
+        menu.addItem(NSMenuItem(title: "Quit Perch",
                                 action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items where item.action != nil {
             item.target = self
@@ -101,6 +117,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let menu = energyModeMenu else { return }
         for item in menu.items {
             item.state = (item.tag == current.rawValue) ? .on : .off
+        }
+    }
+
+    /// Removes the privileged Energy Mode helper (one admin prompt), then refreshes the submenu.
+    @objc private func removeEnergyHelper() {
+        services.powerMode.removeHelper { [weak self] _ in
+            guard let self else { return }
+            self.updateEnergyModeChecks(self.services.powerMode.currentMode())
         }
     }
 
@@ -126,13 +150,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateFeatureChecks()
     }
 
+    @objc private func toggleControl() {
+        state.agentsControlEnabled.toggle()
+        updateFeatureChecks()
+    }
+
     private func updateFeatureChecks() {
         mediaToggleItem?.state = state.mediaEnabled ? .on : .off
         batteryToggleItem?.state = state.batteryEnabled ? .on : .off
         agentsToggleItem?.state = state.agentsEnabled ? .on : .off
         notifyToggleItem?.state = state.notifyOnWaiting ? .on : .off
-        // The notify sub-option only applies while AI Agents is on.
+        controlToggleItem?.state = state.agentsControlEnabled ? .on : .off
+        // The agent sub-options only apply while AI Agents is on.
         notifyToggleItem?.isEnabled = state.agentsEnabled
+        controlToggleItem?.isEnabled = state.agentsEnabled
     }
 
     @objc private func quit() {
@@ -144,6 +175,8 @@ extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         if menu === energyModeMenu {
             updateEnergyModeChecks(services.powerMode.currentMode())
+            // Only offer the teardown when the helper is actually present.
+            removeHelperItem?.isHidden = !services.powerMode.isHelperInstalled()
         } else {
             updateFeatureChecks()
         }
