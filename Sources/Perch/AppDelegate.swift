@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let state = IslandState()
@@ -12,7 +13,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentsToggleItem: NSMenuItem!
     private var notifyToggleItem: NSMenuItem!
     private var controlToggleItem: NSMenuItem!
+    private var controlMenuItem: NSMenuItem!
+    private var controlSubmenu: NSMenu!
+    private var pause15Item: NSMenuItem!
+    private var pause1hItem: NSMenuItem!
+    private var pauseRestartItem: NSMenuItem!
+    private var resumeGatingItem: NSMenuItem!
+    private var recentDecisionsItem: NSMenuItem!
     private var removeHelperItem: NSMenuItem!
+    private var auditWindow: NSWindow?
     private let updateService = UpdateService()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -66,12 +75,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifyToggleItem.target = self
         notifyToggleItem.indentationLevel = 1
         menu.addItem(notifyToggleItem)
-        // Sub-option of AI Agents: let the island approve/deny/stop agents (gates Claude tool calls).
-        controlToggleItem = NSMenuItem(title: "Control (approve/deny/stop)",
+        // Sub-option of AI Agents: Control submenu (toggle + gating snooze).
+        controlMenuItem = NSMenuItem(title: "Control", action: nil, keyEquivalent: "")
+        controlSubmenu = NSMenu(title: "Control")
+        controlSubmenu.delegate = self
+        controlToggleItem = NSMenuItem(title: "Approve / deny / stop",
                                        action: #selector(toggleControl), keyEquivalent: "")
         controlToggleItem.target = self
-        controlToggleItem.indentationLevel = 1
-        menu.addItem(controlToggleItem)
+        controlSubmenu.addItem(controlToggleItem)
+        controlSubmenu.addItem(.separator())
+        pause15Item = NSMenuItem(title: "Pause gating 15 minutes",
+                                 action: #selector(pauseGating15m), keyEquivalent: "")
+        pause1hItem = NSMenuItem(title: "Pause gating 1 hour",
+                                 action: #selector(pauseGating1h), keyEquivalent: "")
+        pauseRestartItem = NSMenuItem(title: "Pause until restart",
+                                      action: #selector(pauseGatingUntilRestart), keyEquivalent: "")
+        resumeGatingItem = NSMenuItem(title: "Resume gating",
+                                      action: #selector(resumeGating), keyEquivalent: "")
+        for item in [pause15Item!, pause1hItem!, pauseRestartItem!, resumeGatingItem!] {
+            item.target = self
+            controlSubmenu.addItem(item)
+        }
+        controlMenuItem.submenu = controlSubmenu
+        controlMenuItem.indentationLevel = 1
+        menu.addItem(controlMenuItem)
+        recentDecisionsItem = NSMenuItem(title: "Recent decisions…",
+                                         action: #selector(showRecentDecisions), keyEquivalent: "")
+        recentDecisionsItem.target = self
+        recentDecisionsItem.indentationLevel = 1
+        menu.addItem(recentDecisionsItem)
         updateFeatureChecks()
         menu.addItem(.separator())
 
@@ -158,6 +190,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateFeatureChecks()
     }
 
+    @objc private func pauseGating15m() {
+        services.pauseGating(until: Date().addingTimeInterval(15 * 60))
+        updateFeatureChecks()
+    }
+
+    @objc private func pauseGating1h() {
+        services.pauseGating(until: Date().addingTimeInterval(60 * 60))
+        updateFeatureChecks()
+    }
+
+    @objc private func pauseGatingUntilRestart() {
+        services.pauseGating(until: AgentCommandService.gatingPausedIndefinite)
+        updateFeatureChecks()
+    }
+
+    @objc private func resumeGating() {
+        services.resumeGating()
+        updateFeatureChecks()
+    }
+
+    @objc private func showRecentDecisions() {
+        let entries = services.agentAudit.recentEntries()
+        let view = AgentAuditView(entries: entries)
+        let controller = NSHostingController(rootView: view)
+        if let auditWindow {
+            auditWindow.contentViewController = controller
+            auditWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let window = NSWindow(contentViewController: controller)
+        window.title = "Perch — Recent decisions"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 360, height: 320))
+        window.center()
+        window.isReleasedWhenClosed = false
+        auditWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func updateFeatureChecks() {
         mediaToggleItem?.state = state.mediaEnabled ? .on : .off
         batteryToggleItem?.state = state.batteryEnabled ? .on : .off
@@ -167,6 +240,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The agent sub-options only apply while AI Agents is on.
         notifyToggleItem?.isEnabled = state.agentsEnabled
         controlToggleItem?.isEnabled = state.agentsEnabled
+        let controlOn = state.agentsEnabled && state.agentsControlEnabled
+        pause15Item?.isEnabled = controlOn
+        pause1hItem?.isEnabled = controlOn
+        pauseRestartItem?.isEnabled = controlOn
+        resumeGatingItem?.isEnabled = controlOn && state.isGatingPaused
+        recentDecisionsItem?.isEnabled = state.agentsEnabled
+        // Subtle paused indicator on the Control parent menu title.
+        if state.isGatingPaused {
+            let indefinite = state.gatingPausedUntil == AgentCommandService.gatingPausedIndefinite
+            controlMenuItem?.title = indefinite ? "Control (gating paused)" : "Control (paused)"
+        } else {
+            controlMenuItem?.title = "Control"
+        }
     }
 
     @objc private func checkForUpdates(_ sender: Any?) {
@@ -184,6 +270,8 @@ extension AppDelegate: NSMenuDelegate {
             updateEnergyModeChecks(services.powerMode.currentMode())
             // Only offer the teardown when the helper is actually present.
             removeHelperItem?.isHidden = !services.powerMode.isHelperInstalled()
+        } else if menu === controlSubmenu {
+            updateFeatureChecks()
         } else {
             updateFeatureChecks()
         }

@@ -45,23 +45,50 @@ _TEXT_MAX = 280
 _COMMANDS_DIR = Path.home() / ".claude" / "agent-commands"
 
 
-def _load_config() -> tuple[bool, set]:
-    """Reads Perch's gating config. Returns (gating_enabled, gated_tool_set)."""
+def _parse_paused_until(data: dict) -> float | None:
+    """Returns a Unix timestamp when gating is paused, or None."""
+    raw = data.get("gating_paused_until")
+    if raw is None or raw is False:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        # ISO-8601 from Perch (e.g. 2026-06-10T12:00:00Z).
+        from datetime import datetime, timezone
+
+        text = raw.strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _gating_paused(data: dict) -> bool:
+    """True when Perch has snoozed gating and the pause window has not elapsed."""
+    until = _parse_paused_until(data)
+    return until is not None and time.time() < until
+
+
+def _load_config() -> tuple[bool, set, bool]:
+    """Reads Perch's gating config. Returns (gating_enabled, gated_tool_set, paused)."""
     path = _COMMANDS_DIR / "_config.json"
     try:
         with path.open() as handle:
             data = json.load(handle)
     except (ValueError, OSError):
-        return False, _DEFAULT_GATED_TOOLS
+        return False, _DEFAULT_GATED_TOOLS, False
     if not isinstance(data, dict):
-        return False, _DEFAULT_GATED_TOOLS
+        return False, _DEFAULT_GATED_TOOLS, False
     gating = data.get("gating") is True
+    paused = _gating_paused(data)
     tools = data.get("tools")
     if isinstance(tools, list):
         gated = {str(t) for t in tools if isinstance(t, str)}
     else:
         gated = _DEFAULT_GATED_TOOLS
-    return gating, (gated or _DEFAULT_GATED_TOOLS)
+    return gating, (gated or _DEFAULT_GATED_TOOLS), paused
 
 
 def _read_command(session_id: str):
@@ -145,8 +172,8 @@ def main() -> None:
     record["pid"] = os.getppid()
     tool_name = str(payload.get("tool_name", "")).strip()
 
-    gating, gated_tools = _load_config()
-    if not gating or tool_name not in gated_tools:
+    gating, gated_tools, paused = _load_config()
+    if not gating or paused or tool_name not in gated_tools:
         # Control off or non-gated tool: behave exactly like the plain writer (no blocking, defer).
         cas.write_record(session_id, record)
         return

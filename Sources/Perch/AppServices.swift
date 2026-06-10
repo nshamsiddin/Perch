@@ -15,6 +15,7 @@ final class AppServices: ObservableObject {
     let agentFocus: AgentFocusService
     let agentNotifications: AgentNotificationService
     let agentCommands: AgentCommandService
+    let agentAudit: AgentAuditService
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -28,6 +29,7 @@ final class AppServices: ObservableObject {
         self.agentFocus = AgentFocusService()
         self.agentNotifications = AgentNotificationService()
         self.agentCommands = AgentCommandService()
+        self.agentAudit = AgentAuditService()
         self.agents = AgentStatusService(state: state, activity: activity)
 
         // Tapping a "waiting" notification refocuses that agent (if it's still active).
@@ -55,16 +57,34 @@ final class AppServices: ObservableObject {
     /// Approves the session's pending tool call, optionally with a short steering note.
     func approveAgent(_ session: AgentSession, note: String? = nil) {
         agentCommands.approve(session, note: note)
+        agentAudit.record(.allow, session: session, note: note)
     }
 
     /// Denies the session's pending tool call.
-    func denyAgent(_ session: AgentSession) {
-        agentCommands.deny(session)
+    func denyAgent(_ session: AgentSession, reason: String? = nil) {
+        agentCommands.deny(session, reason: reason)
+        agentAudit.record(.deny, session: session, note: reason)
     }
 
     /// Best-effort stop of a running agent (SIGINT + deny-next).
     func stopAgent(_ session: AgentSession) {
         agentCommands.stop(session)
+        agentAudit.record(.stop, session: session)
+    }
+
+    // MARK: - Gating snooze
+
+    /// Pauses gate blocking until `until`. Pass `AgentCommandService.gatingPausedIndefinite` for
+    /// "until restart".
+    func pauseGating(until: Date) {
+        state.gatingPausedUntil = until
+        syncGatingConfig()
+    }
+
+    /// Clears any active gating snooze and resumes normal blocking behavior.
+    func resumeGating() {
+        state.gatingPausedUntil = nil
+        syncGatingConfig()
     }
 
     func start() {
@@ -84,7 +104,8 @@ final class AppServices: ObservableObject {
     /// Tells the gate hooks whether to route tool calls through the island. Gating is on only when
     /// both the AI feature and Control are enabled, so turning either off restores normal behavior.
     private func syncGatingConfig() {
-        agentCommands.setGating(enabled: state.agentsControlActive)
+        let pausedUntil = state.isGatingPaused ? state.gatingPausedUntil : nil
+        agentCommands.setGating(enabled: state.agentsControlActive, pausedUntil: pausedUntil)
     }
 
     func stop() {
@@ -156,6 +177,16 @@ final class AppServices: ObservableObject {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in self?.syncGatingConfig() }
+            .store(in: &cancellables)
+
+        state.$gatingPausedUntil
+            .sink { [weak self] until in
+                guard let self else { return }
+                if let until, until <= Date() {
+                    self.state.gatingPausedUntil = nil
+                }
+                self.syncGatingConfig()
+            }
             .store(in: &cancellables)
     }
 }

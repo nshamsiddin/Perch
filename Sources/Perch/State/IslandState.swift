@@ -165,6 +165,11 @@ final class IslandState: ObservableObject {
     @Published var agentsControlEnabled: Bool = IslandState.loadFlag(SettingsKey.control, default: false) {
         didSet { IslandState.saveFlag(SettingsKey.control, agentsControlEnabled) }
     }
+    /// When set and in the future, gate hooks skip blocking until this instant (snooze). Cleared on
+    /// resume or when the deadline passes. Persisted as an ISO-8601 string.
+    @Published var gatingPausedUntil: Date? = IslandState.loadPausedUntil() {
+        didSet { IslandState.savePausedUntil(gatingPausedUntil) }
+    }
 
     private enum SettingsKey {
         static let media = "feature.media.enabled"
@@ -172,6 +177,7 @@ final class IslandState: ObservableObject {
         static let agents = "feature.agents.enabled"
         static let notify = "feature.agents.notify"
         static let control = "feature.agents.control"
+        static let gatingPausedUntil = "feature.agents.gatingPausedUntil"
     }
 
     /// Reads a persisted feature flag, defaulting to `defaultValue` when never set.
@@ -183,6 +189,26 @@ final class IslandState: ObservableObject {
 
     private static func saveFlag(_ key: String, _ value: Bool) {
         UserDefaults.standard.set(value, forKey: key)
+    }
+
+    private static let pausedUntilFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static func loadPausedUntil() -> Date? {
+        guard let raw = UserDefaults.standard.string(forKey: SettingsKey.gatingPausedUntil) else { return nil }
+        return pausedUntilFormatter.date(from: raw)
+    }
+
+    private static func savePausedUntil(_ date: Date?) {
+        let defaults = UserDefaults.standard
+        if let date {
+            defaults.set(pausedUntilFormatter.string(from: date), forKey: SettingsKey.gatingPausedUntil)
+        } else {
+            defaults.removeObject(forKey: SettingsKey.gatingPausedUntil)
+        }
     }
 
     @Published var nowPlaying: NowPlaying = .empty
@@ -229,6 +255,12 @@ final class IslandState: ObservableObject {
 
     /// True while the island may act on agents: the AI feature and Control are both on.
     var agentsControlActive: Bool { agentsEnabled && agentsControlEnabled }
+
+    /// True while gating is snoozed — hooks fail open until the pause deadline passes.
+    var isGatingPaused: Bool {
+        guard let until = gatingPausedUntil else { return false }
+        return until > Date()
+    }
 
     /// Visible sessions currently blocking on an island approval decision (drives taller rows).
     var agentApprovalCount: Int { visibleAgentSessions.lazy.filter { $0.isAwaitingApproval }.count }

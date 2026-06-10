@@ -38,14 +38,44 @@ _TEXT_MAX = 280
 _COMMANDS_DIR = Path.home() / ".cursor" / "agent-commands"
 
 
-def _gating_enabled() -> bool:
+def _parse_paused_until(data: dict):
+    raw = data.get("gating_paused_until")
+    if raw is None or raw is False:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        from datetime import datetime, timezone
+
+        text = raw.strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _gating_paused(data: dict) -> bool:
+    until = _parse_paused_until(data)
+    return until is not None and time.time() < until
+
+
+def _load_config() -> tuple[bool, bool]:
     path = _COMMANDS_DIR / "_config.json"
     try:
         with path.open() as handle:
             data = json.load(handle)
     except (ValueError, OSError):
-        return False
-    return isinstance(data, dict) and data.get("gating") is True
+        return False, False
+    if not isinstance(data, dict):
+        return False, False
+    return data.get("gating") is True, _gating_paused(data)
+
+
+def _gating_enabled() -> bool:
+    enabled, paused = _load_config()
+    return enabled and not paused
 
 
 def _read_command(conversation_id: str):

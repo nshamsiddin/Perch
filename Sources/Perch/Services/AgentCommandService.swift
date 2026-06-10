@@ -78,10 +78,27 @@ final class AgentCommandService {
 
     // MARK: - Gating config
 
-    /// Publishes whether the Claude gate hook should block tool calls on the island, and which
-    /// tools. Written to both command dirs so each tool's gate reads a local copy.
-    func setGating(enabled: Bool, tools: [String] = AgentCommandService.defaultGatedTools) {
-        let config: [String: Any] = ["gating": enabled, "tools": tools]
+    /// Far-future sentinel for "pause until restart" — hooks treat any future timestamp as paused.
+    static let gatingPausedIndefinite = Date(timeIntervalSince1970: 4_102_444_800) // 2099-12-31
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Publishes whether the gate hooks should block tool calls on the island, which tools, and an
+    /// optional pause window (`gating_paused_until`). While paused and `now < pausedUntil`, hooks
+    /// skip blocking (fail open). Written to both command dirs so each tool's gate reads a local copy.
+    func setGating(enabled: Bool,
+                   tools: [String] = AgentCommandService.defaultGatedTools,
+                   pausedUntil: Date? = nil) {
+        var config: [String: Any] = ["gating": enabled, "tools": tools]
+        if let pausedUntil, pausedUntil > Date() {
+            config["gating_paused_until"] = Self.isoFormatter.string(from: pausedUntil)
+        } else {
+            config["gating_paused_until"] = NSNull()
+        }
         for dir in [claudeCommandsDir, cursorCommandsDir] {
             atomicWrite(config, to: dir.appendingPathComponent("_config.json"))
         }
