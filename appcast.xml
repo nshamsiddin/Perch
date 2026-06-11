@@ -6,6 +6,16 @@
         <description>Most recent updates to Perch</description>
         <language>en</language>
         <item>
+            <title>Version 1.1.4</title>
+            <sparkle:version>1.1.4</sparkle:version>
+            <sparkle:shortVersionString>1.1.4</sparkle:shortVersionString>
+            <pubDate>Thu, 11 Jun 2026 11:47:31 +0000</pubDate>
+            <enclosure url="https://github.com/nshamsiddin/Perch/releases/download/v1.1.4/Perch-v1.1.4.dmg"
+                       sparkle:edSignature="IGmHSy9SzkV3A3nhlwHaGTK2FPbD53fAgidasvaTYkdttNQrs2ZWp1OTtd95M1X/dL50lLCOYFg9N8osnf7aAw=="
+                       length="1928821"
+                       type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 1.1.3</title>
             <sparkle:version>1.1.3</sparkle:version>
             <sparkle:shortVersionString>1.1.3</sparkle:shortVersionString>
