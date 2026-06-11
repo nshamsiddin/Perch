@@ -378,10 +378,21 @@ private struct BatteryView: View {
                     isCharging: state.battery.isCharging,
                     theme: theme
                 )
-                Text("\(max(state.battery.percentage, 0))%")
-                    .font(.system(size: 12, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(theme.primaryText)
+                HStack(spacing: 4) {
+                    Text("\(max(state.battery.percentage, 0))%")
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(theme.primaryText)
+                    if state.battery.isPluggedIn, let watts = state.battery.adapterWatts {
+                        Text("·")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(theme.secondaryText)
+                        Text("\(watts)W")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(theme.secondaryText)
+                    }
+                }
             }
             .padding(.horizontal, layout.chipHorizontalPadding)
             .padding(.vertical, 6)

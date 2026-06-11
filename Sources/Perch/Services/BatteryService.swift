@@ -41,9 +41,17 @@ final class BatteryService {
         let status = Self.read()
 
         if let last = lastPluggedIn, last != status.isPluggedIn, status.hasBattery {
+            let plugText: String
+            if status.isPluggedIn, let watts = status.adapterWatts {
+                plugText = "\(watts)W connected"
+            } else if status.isPluggedIn {
+                plugText = "Power connected"
+            } else {
+                plugText = "On battery"
+            }
             activity.show(
                 symbol: status.isPluggedIn ? "powerplug.fill" : "battery.75",
-                text: status.isPluggedIn ? "Power connected" : "On battery"
+                text: plugText
             )
         }
         lastPluggedIn = status.hasBattery ? status.isPluggedIn : nil
@@ -75,14 +83,24 @@ final class BatteryService {
                 percentage = current ?? -1
             }
 
+            let adapterDetails = IOPSCopyExternalPowerAdapterDetails()?
+                .takeRetainedValue() as? [String: Any]
+            let adapterWatts = pluggedIn ? Self.parseAdapterWatts(from: adapterDetails) : nil
+
             return BatteryStatus(
                 percentage: percentage,
                 isCharging: isCharging,
                 isPluggedIn: pluggedIn,
-                hasBattery: true
+                hasBattery: true,
+                adapterWatts: adapterWatts
             )
         }
 
         return .unknown
+    }
+
+    static func parseAdapterWatts(from details: [String: Any]?) -> Int? {
+        guard let watts = details?[kIOPSPowerAdapterWattsKey] as? Int, watts > 0 else { return nil }
+        return watts
     }
 }

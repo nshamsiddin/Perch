@@ -19,7 +19,7 @@ Built with Swift Package Manager — no Xcode project required.
 - **Volume HUD** — a transient output-volume / mute peek flanks the notch on volume changes,
   via CoreAudio property listeners (no permissions). Best-effort suppression of the native bezel
   so only Perch's HUD shows.
-- **Battery / power** — charge % and charging state via IOKit (event-driven).
+- **Battery / power** — charge % and charging state via IOKit (event-driven), plus adapter wattage when plugged in (IOKit, best-effort).
 - **Energy Mode** — switch macOS Energy Mode (Automatic / Low Power / High Power) from the menu.
   See *Energy Mode & permissions* below — this is the one feature that needs a one-time admin
   prompt, and it can be removed cleanly.

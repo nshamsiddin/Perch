@@ -27,8 +27,9 @@ struct BatteryStatus: Equatable {
     var isCharging: Bool
     var isPluggedIn: Bool
     var hasBattery: Bool
+    var adapterWatts: Int?       // rated AC adapter watts; nil when unplugged or unknown
 
-    static let unknown = BatteryStatus(percentage: -1, isCharging: false, isPluggedIn: false, hasBattery: false)
+    static let unknown = BatteryStatus(percentage: -1, isCharging: false, isPluggedIn: false, hasBattery: false, adapterWatts: nil)
 }
 
 /// A transient output-volume HUD shown flanking the notch when volume/mute changes.
