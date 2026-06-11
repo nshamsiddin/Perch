@@ -36,9 +36,15 @@ DOWNLOAD_URL="https://github.com/nshamsiddin/Perch/releases/download/${TAG}/${DM
 LENGTH="$(stat -f%z "$DMG_PATH")"
 
 ED_SIGNATURE=""
+KEY_FILE=""
+BASELINE=""
+cleanup() {
+    rm -f ${KEY_FILE:+"$KEY_FILE"} ${BASELINE:+"$BASELINE"}
+}
+trap cleanup EXIT
+
 if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
     KEY_FILE="$(mktemp)"
-    trap 'rm -f "$KEY_FILE"' EXIT
     printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
     chmod 600 "$KEY_FILE"
     SIGN_OUTPUT="$("$SIGN_UPDATE" --ed-key-file "$KEY_FILE" "$DMG_PATH")"
@@ -53,14 +59,7 @@ fi
 
 PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
 
-cat > "$ROOT/appcast.xml" <<EOF
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <channel>
-        <title>Perch</title>
-        <link>https://github.com/nshamsiddin/Perch</link>
-        <description>Most recent updates to Perch</description>
-        <language>en</language>
+NEW_ITEM=$(cat <<ITEM
         <item>
             <title>Version ${VERSION}</title>
             <sparkle:version>${VERSION}</sparkle:version>
@@ -71,8 +70,50 @@ cat > "$ROOT/appcast.xml" <<EOF
                        length="${LENGTH}"
                        type="application/octet-stream" />
         </item>
+ITEM
+)
+
+# Prefer the live feed on master so release builds prepend instead of replacing history.
+BASELINE="$(mktemp)"
+if git show origin/master:appcast.xml > "$BASELINE" 2>/dev/null; then
+    :
+elif [ -f "$ROOT/appcast.xml" ]; then
+    cp "$ROOT/appcast.xml" "$BASELINE"
+fi
+
+if [ -s "$BASELINE" ] && grep -q '<item>' "$BASELINE"; then
+    if grep -q "<sparkle:version>${VERSION}</sparkle:version>" "$BASELINE"; then
+        echo "Version ${VERSION} already present in appcast.xml; leaving feed unchanged" >&2
+        cp "$BASELINE" "$ROOT/appcast.xml"
+        exit 0
+    fi
+    EXISTING_ITEMS="$(awk '/^[[:space:]]*<item>/,/^[[:space:]]*<\/item>/' "$BASELINE")"
+    cat > "$ROOT/appcast.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>Perch</title>
+        <link>https://github.com/nshamsiddin/Perch</link>
+        <description>Most recent updates to Perch</description>
+        <language>en</language>
+${NEW_ITEM}
+${EXISTING_ITEMS}
     </channel>
 </rss>
 EOF
+else
+    cat > "$ROOT/appcast.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>Perch</title>
+        <link>https://github.com/nshamsiddin/Perch</link>
+        <description>Most recent updates to Perch</description>
+        <language>en</language>
+${NEW_ITEM}
+    </channel>
+</rss>
+EOF
+fi
 
 echo "==> Wrote appcast.xml (enclosure: ${DOWNLOAD_URL})"

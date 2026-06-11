@@ -114,9 +114,11 @@ The app reads its feed from a stable URL:
 
 `https://raw.githubusercontent.com/nshamsiddin/Perch/master/appcast.xml`
 
-Each `v*` release workflow builds a signed appcast entry, attaches `appcast.xml` to the GitHub
-release, and commits the latest feed to `master` so the raw URL always points at the newest
-version.
+Each `v*` release workflow builds a signed appcast entry, commits the updated feed to `master`
+**before** publishing the GitHub release (so the feed is live when the release goes public), then
+attaches `appcast.xml` to the release asset. GitHub's raw CDN may cache the feed for up to ~5
+minutes after a push; if a user checks immediately after a release, **Check for Updates…** again
+after a short wait.
 
 ### Maintainer setup (one time)
 
