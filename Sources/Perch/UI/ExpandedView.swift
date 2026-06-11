@@ -194,6 +194,8 @@ private struct MediaView: View {
             // Spotify mark in the tile.
             Button { services.media.launchSpotify() } label: { idleRow }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
                 .help("Open Spotify")
         }
     }

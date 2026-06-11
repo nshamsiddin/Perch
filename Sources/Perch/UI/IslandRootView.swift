@@ -99,6 +99,7 @@ struct IslandRootView: View {
             UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
                 .strokeBorder(Color.orange, lineWidth: 2)
                 .opacity(flashOpacity)
+                .allowsHitTesting(flashOpacity > 0)
         )
         .shadow(color: .orange.opacity(flashOpacity * 0.6), radius: 10)
         .shadow(color: .black.opacity(presentation == .expanded ? theme.shadowOpacity : 0),

@@ -65,6 +65,21 @@ final class IslandLayoutTests: XCTestCase {
         XCTAssertLessThan(hover.maxX, visible.maxX)
     }
 
+    func testExpandedMediaRowCenterInsideInteractiveAndHoverZones() {
+        let layout = IslandLayout(geometry: geometry, mediaEnabled: true, batteryEnabled: true)
+        let interactive = layout.expandedInteractiveRect(sessionCount: 0)
+        let hover = layout.expandedHoverHotZone(sessionCount: 0)
+        let windowH = layout.windowSize.height
+
+        // Media row center: below the notch strip in the drawn panel (top-aligned, bottom-left coords).
+        let mediaCenter = CGPoint(
+            x: layout.windowMarginX + 16 + 29,
+            y: windowH - geometry.notchHeight - 33
+        )
+        XCTAssertTrue(interactive.contains(mediaCenter))
+        XCTAssertTrue(hover.contains(mediaCenter))
+    }
+
     func testNotchCenterHoverHotZoneCoversNotchNotEars() {
         let layout = IslandLayout(geometry: geometry)
         let full = layout.hoverHotZone(width: layout.compactWidth)
