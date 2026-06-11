@@ -31,4 +31,20 @@ final class PresentationRegistryTests: XCTestCase {
         let registry = PresentationRegistry(state: state, layout: layout)
         XCTAssertEqual(registry.presentation, .agentLive)
     }
+
+    func testNowPlayingExpandHoverUsesNotchCenterOnly() {
+        let state = IslandState()
+        state.mediaEnabled = true
+        state.nowPlaying = NowPlaying(
+            title: "Song", artist: "Artist", album: "Album",
+            isPlaying: true, source: "Spotify", bundleIdentifier: nil
+        )
+        let layout = IslandLayout(geometry: geometry)
+        let registry = PresentationRegistry(state: state, layout: layout)
+        XCTAssertEqual(registry.presentation, .nowPlayingCompact)
+
+        let full = layout.hoverHotZone(width: layout.compactWidth)
+        let expand = registry.collapsedExpandHoverZone(notchWidth: geometry.notchWidth)
+        XCTAssertLessThan(expand.width, full.width)
+    }
 }

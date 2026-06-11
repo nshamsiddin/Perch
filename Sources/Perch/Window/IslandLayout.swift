@@ -211,4 +211,13 @@ struct IslandLayout {
     func hoverHotZone(width: CGFloat) -> CGRect {
         collapsedRect(width: width).insetBy(dx: -6, dy: -2)
     }
+
+    /// Hover zone over the physical notch strip only. Flanking ears stay tappable (now-playing art,
+    /// calendar countdown) without hover-to-expand stealing the click before the button fires.
+    func notchCenterHoverHotZone(totalWidth: CGFloat, notchWidth: CGFloat) -> CGRect {
+        let h = geometry.notchHeight
+        let x = (windowSize.width - totalWidth) / 2 + earWidth
+        return CGRect(x: x, y: windowSize.height - h, width: notchWidth, height: h)
+            .insetBy(dx: -6, dy: -2)
+    }
 }

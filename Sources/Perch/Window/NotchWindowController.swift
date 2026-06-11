@@ -143,7 +143,7 @@ final class NotchWindowController {
 
     func handleMouseMoved(at point: CGPoint) {
         if state.mode == .collapsed {
-            if layout.hoverHotZone(width: currentCollapsedWidth()).contains(point) {
+            if registry.collapsedExpandHoverZone(notchWidth: state.geometry.notchWidth).contains(point) {
                 expand()
             }
         } else {

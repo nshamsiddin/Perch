@@ -88,6 +88,18 @@ struct PresentationRegistry {
         }
     }
 
+    /// Region where hovering while collapsed should expand the panel. Ear widgets with tap actions
+    /// only expand from the notch center so artwork/icons keep their click targets.
+    func collapsedExpandHoverZone(notchWidth: CGFloat) -> CGRect {
+        let width = collapsedWidth(notchWidth: notchWidth)
+        switch presentation {
+        case .nowPlayingCompact, .calendarCountdown:
+            return layout.notchCenterHoverHotZone(totalWidth: width, notchWidth: notchWidth)
+        default:
+            return layout.hoverHotZone(width: width)
+        }
+    }
+
     private func slot(for widget: IslandWidget) -> IslandCollapsedPresentation? {
         switch widget {
         case .media:          return .nowPlayingCompact

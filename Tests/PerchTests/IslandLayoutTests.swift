@@ -64,4 +64,20 @@ final class IslandLayoutTests: XCTestCase {
         XCTAssertGreaterThan(hover.minX, visible.minX)
         XCTAssertLessThan(hover.maxX, visible.maxX)
     }
+
+    func testNotchCenterHoverHotZoneCoversNotchNotEars() {
+        let layout = IslandLayout(geometry: geometry)
+        let full = layout.hoverHotZone(width: layout.compactWidth)
+        let center = layout.notchCenterHoverHotZone(totalWidth: layout.compactWidth,
+                                                    notchWidth: geometry.notchWidth)
+
+        XCTAssertLessThan(center.width, full.width)
+        XCTAssertEqual(center.midX, full.midX, accuracy: 0.0001)
+
+        let leftEarMidX = full.minX + layout.earWidth / 2
+        let rightEarMidX = full.maxX - layout.earWidth / 2
+        XCTAssertFalse(center.contains(CGPoint(x: leftEarMidX, y: center.midY)))
+        XCTAssertFalse(center.contains(CGPoint(x: rightEarMidX, y: center.midY)))
+        XCTAssertTrue(center.contains(CGPoint(x: center.midX, y: center.midY)))
+    }
 }
