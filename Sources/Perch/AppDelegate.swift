@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let header = NSMenuItem(title: "Perch", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let versionItem = NSMenuItem(title: "Version \(version)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
         menu.addItem(.separator())
 
         let featuresHeader = NSMenuItem(title: "Features", action: nil, keyEquivalent: "")
